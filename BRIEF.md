@@ -25,10 +25,11 @@ module may register anything at import time or reach outside the plugin.
 - Every tool's definition must come from `defineTool` in `lib/tool.js`; the
   harness implementation is swapped in at plugin load when resolvable.
 - Do not edit files outside your task's write scope. The shared scaffold
-  (`index.js`, `lib/tool.js`, `lib/env.js`, `lib/http.js`, `lib/service.js`,
-  `preset/`, `tools/`, `README.md`) is owned by the Lead.
+  (`index.js`, `lib/tool.js`, `lib/env.js`, `lib/http.js`, `preset/`, `tools/`,
+  `README.md`) is owned by the Lead.
 - Non-trivial pure logic must be exported and unit-tested with `node:test`
-  (`node --test test/` must pass from the package root).
+  (`npm test` runs `node --test "test/*.test.js"`, which is what works on
+  Node 25; a bare directory argument is treated as a module entry).
 
 ## Scaffold API you code against
 
@@ -54,13 +55,6 @@ postJson(base, path, body, options), tryJson(...), tryRaw(...), sleep(ms, signal
 // getJson/postJson parse JSON and throw HttpError on non-2xx.
 // tryJson returns undefined only when the peer is unreachable (HttpError still throws).
 // getRaw resolves the Response for streams/downloads; non-2xx throws HttpError.
-```
-
-```js
-// lib/service.js
-comfy     // live ComfyUI web API (object_info, queue, history, prompt, models)
-ollama    // local vision models (tags, chat with images)
-camofox   // camofox-browser session driver (health, tabs, navigate, evaluate)
 ```
 
 ## Tool definition contract

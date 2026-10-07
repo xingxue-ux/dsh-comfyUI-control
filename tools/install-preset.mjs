@@ -18,7 +18,11 @@ import { bundle } from './bundle.mjs'
 
 const PACKAGE_DIR = dirname(dirname(fileURLToPath(import.meta.url)))
 const PRESET_DIR = join(PACKAGE_DIR, 'preset')
-const BUNDLE_NAME = 'dsh-comfyui-control.js'
+// The plugin is a directory inside the preset that mirrors this package's shape:
+// the bundle sits in `lib/`, so the plugin resolves its own root as the preset
+// directory whether it runs from a checkout or from this copy.
+const BUNDLE_DIR = 'dsh-comfyui-control'
+const BUNDLE_ENTRY = `${BUNDLE_DIR}/lib/index.js`
 
 function parseArgs(argv) {
   const options = { id: 'drawing', dshHome: process.env.DSH_HOME || join(homedir(), '.dsh'), force: false, uninstall: false }
@@ -67,20 +71,37 @@ if (existsSync(target) && !options.force) {
 }
 
 mkdirSync(target, { recursive: true })
-const source = bundle()
-writeFileSync(join(target, BUNDLE_NAME), source, 'utf8')
+const pluginDir = join(target, BUNDLE_DIR)
+mkdirSync(join(pluginDir, 'lib'), { recursive: true })
+const bundlePath = join(pluginDir, 'lib', 'index.js')
+writeFileSync(bundlePath, bundle(), 'utf8')
 copyFileSync(join(PRESET_DIR, 'preset.yml'), join(target, 'preset.yml'))
 copyFileSync(join(PRESET_DIR, 'agent.cordis.yml'), join(target, 'agent.cordis.yml'))
 const guide = join(PACKAGE_DIR, 'docs', 'LORA_GUIDE.md')
-if (existsSync(guide)) copyFileSync(guide, join(target, 'LORA_GUIDE.md'))
+let guidePaths = []
+if (existsSync(guide)) {
+  copyFileSync(guide, join(target, 'LORA_GUIDE.md'))
+  // A second copy in the plugin's state directory, so the default install and a
+  // checkout run from anywhere agree on where the guide lives.
+  const stateDir = join(options.dshHome, 'storages', 'dsh-comfyui-control')
+  mkdirSync(stateDir, { recursive: true })
+  copyFileSync(guide, join(stateDir, 'LORA_GUIDE.md'))
+  guidePaths = [join(target, 'LORA_GUIDE.md'), join(stateDir, 'LORA_GUIDE.md')]
+}
+// The Anima workflow travels with the preset so the installed copy is
+// self-contained: the bundle resolves its own directory as its plugin root.
+const pipeline = join(PACKAGE_DIR, 'pipeline.json')
+if (existsSync(pipeline)) copyFileSync(pipeline, join(target, 'pipeline.json'))
 
-const { toolList } = await import(`file:///${join(target, BUNDLE_NAME).replace(/\\/g, '/')}?install=${Date.now()}`)
+const { toolList } = await import(`file:///${bundlePath.replace(/\\/g, '/')}?install=${Date.now()}`)
 
 process.stdout.write([
   `installed 绘图模式 preset: ${target}`,
   `  preset.yml        display name and picker description`,
-  `  agent.cordis.yml  composition; mounts ./${BUNDLE_NAME}`,
-  `  ${BUNDLE_NAME}  self-contained plugin (${toolList().length} comfyui_* tools)`,
+  `  agent.cordis.yml  composition; mounts ./${BUNDLE_ENTRY}`,
+  `  ${BUNDLE_ENTRY}  self-contained plugin (${toolList().length} comfyui_* tools)`,
+  ...(existsSync(join(target, 'pipeline.json')) ? ['  pipeline.json     Anima 管线 workflow（随预设一起安装）'] : []),
+  ...(guidePaths.length > 0 ? [`  LORA_GUIDE.md     LoRA 规范（read 工具用这些路径）:`, ...guidePaths.map((path) => `                      ${path}`)] : []),
   '',
   'Other presets do not name this plugin, so they never see these tools.',
   'Select 绘图模式 in the agent-preset picker (or set it as the default) to use them.',

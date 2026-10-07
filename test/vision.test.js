@@ -10,10 +10,26 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import { deflateSync } from 'node:zlib'
-import { OLLAMA_URL } from '../lib/env.js'
-import { decodePng, encodePng, parsePng, readTextMetadata } from '../lib/png.js'
-import { tools } from '../lib/tools/vision.js'
-import { gilbertCurve, transformTimes, xfqTransform } from '../lib/xfq.js'
+
+let tempDir
+function tempPath(name) {
+  if (!tempDir) tempDir = mkdtempSync(join(tmpdir(), 'dsh-vision-'))
+  return join(tempDir, name)
+}
+
+process.on('exit', () => {
+  if (tempDir) rmSync(tempDir, { recursive: true, force: true })
+})
+
+// The de-obfuscation tool only writes inside outputDir()/STATE_DIR, and both are
+// resolved at module load. Pointing the state directory at this suite's temp
+// directory first means the tool's write boundary is the test sandbox.
+process.env.DSH_COMFYUI_STATE = tempPath('state')
+
+const { OLLAMA_URL } = await import('../lib/env.js')
+const { decodePng, encodePng, parsePng, readTextMetadata } = await import('../lib/png.js')
+const { tools } = await import('../lib/tools/vision.js')
+const { gilbertCurve, transformTimes, xfqTransform } = await import('../lib/xfq.js')
 
 const describeTool = tools.find((tool) => tool.name === 'comfyui_describe_image')
 const deconfuseTool = tools.find((tool) => tool.name === 'comfyui_deconfuse_image')
@@ -115,16 +131,6 @@ function rowsOf(data, width, channels) {
 function sameBytes(actual, expected) {
   return Buffer.from(actual).equals(Buffer.from(expected))
 }
-
-let tempDir
-function tempPath(name) {
-  if (!tempDir) tempDir = mkdtempSync(join(tmpdir(), 'dsh-vision-'))
-  return join(tempDir, name)
-}
-
-process.on('exit', () => {
-  if (tempDir) rmSync(tempDir, { recursive: true, force: true })
-})
 
 // ---------------------------------------------------------------- PNG codec
 
@@ -346,10 +352,12 @@ test('comfyui_describe_image sends the upstream default Ollama request', async (
   })
 })
 
-test('comfyui_describe_image falls back to llava:7b on every NSFW refusal keyword', async (t) => {
+test('comfyui_describe_image falls back to llava:7b on every refusal keyword', async (t) => {
   const path = tempPath('refusal.png')
   writeFileSync(path, encodePng({ width: 4, height: 4, channels: 3, data: new Uint8Array(48).fill(1) }))
-  for (const keyword of ['无法提供', '不能', '抱歉', '不当内容', '公序良俗', '健康积极']) {
+  // The single-question path uses upstream's five keywords; 健康积极 is only a
+  // detail-mode keyword, so a free-form question mentioning it stays on llava.
+  for (const keyword of ['无法提供', '不能', '抱歉', '不当内容', '公序良俗']) {
     const calls = withFetch(t, [{ message: { content: `${keyword}，换个问题吧。` } }, { message: { content: 'A flat coloured square.' } }])
     const answer = await describeTool.execute({ image_path: path, question: '描述这张图' }, {})
     assert.equal(answer, 'A flat coloured square.', keyword)
@@ -359,6 +367,24 @@ test('comfyui_describe_image falls back to llava:7b on every NSFW refusal keywor
     assert.deepEqual(retry.options, { num_gpu: 99, num_ctx: 2048 })
     assert.equal(retry.messages[0].content, 'Describe this image in detail: character appearance, clothing, pose, background, art style.')
   }
+})
+
+test('a single question stays on the main model when the answer merely mentions 健康积极', async (t) => {
+  const path = tempPath('benign.png')
+  writeFileSync(path, encodePng({ width: 4, height: 4, channels: 3, data: new Uint8Array(48).fill(3) }))
+  const calls = withFetch(t, [{ message: { content: '画面健康积极，构图良好。' } }])
+  const answer = await describeTool.execute({ image_path: path, question: '描述这张图' }, {})
+  assert.equal(answer, '画面健康积极，构图良好。')
+  assert.equal(calls.length, 1)
+})
+
+test('detail mode treats 健康积极 as a refusal', async (t) => {
+  const path = tempPath('detail-refusal.png')
+  writeFileSync(path, encodePng({ width: 4, height: 4, channels: 3, data: new Uint8Array(48).fill(4) }))
+  const calls = withFetch(t, [{ message: { content: '健康积极的内容无法描述。' } }, { message: { content: 'english answer' } }])
+  const answer = await describeTool.execute({ image_path: path, detail: true }, {})
+  assert.match(answer, /english answer/)
+  assert.equal(JSON.parse(calls[1].init.body).model, 'llava:7b')
 })
 
 test('comfyui_describe_image detail mode runs 11 questions and retries the English list', async (t) => {
@@ -432,6 +458,9 @@ test('comfyui_deconfuse_image defaults the output name and warns without metadat
   assert.equal(result.times, 2)
   assert.equal(result.mode, 'dec')
   assert.ok(result.output.endsWith('plain_dec.png'), result.output)
+  // The input lives outside the output/state directories, so the default target
+  // falls back to the state directory instead of writing beside it.
+  assert.ok(result.output.startsWith(tempPath('state')), result.output)
   assert.match(result.log, /第1次解混淆完成/)
   assert.match(result.log, /第2次解混淆完成/)
   assert.match(result.log, /警告: 输入无文本元数据，直接保存/)
@@ -444,12 +473,15 @@ test('comfyui_deconfuse_image inverts two obfuscation passes and honours out_pat
   const data = pattern(width, height, 3, 9)
   const input = tempPath('twice.png')
   writeFileSync(input, encodePng({ width, height, channels: 3, data }))
-  const out = tempPath('nested/dir/restored.png')
-  const encrypted = await deconfuseTool.execute({ image_path: input, mode: 'enc', times: 2, out_path: tempPath('nested/dir/scrambled.png') }, {})
+  const out = tempPath('state/nested/dir/restored.png')
+  const encrypted = await deconfuseTool.execute({ image_path: input, mode: 'enc', times: 2, out_path: tempPath('state/nested/dir/scrambled.png') }, {})
   const restored = await deconfuseTool.execute({ image_path: encrypted.output, times: 2, out_path: out }, {})
   assert.equal(restored.output, out)
   assert.ok(sameBytes(decodePng(readFileSync(out)).data, data), 'enc x2 then dec x2 must be the identity')
   await assert.rejects(deconfuseTool.execute({ image_path: tempPath('nope.png') }, {}), /file not found/)
+  await assert.rejects(deconfuseTool.execute({ image_path: input, out_path: tempPath('outside.png') }, {}), /out_path must stay inside/)
+  await assert.rejects(deconfuseTool.execute({ image_path: input, times: 0 }, {}), /positive integer/)
+  await assert.rejects(deconfuseTool.execute({ image_path: input, times: 10_000 }, {}), /limited to/)
 })
 
 // ---------------------------------------------------------------- live smoke

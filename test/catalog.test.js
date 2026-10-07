@@ -123,7 +123,7 @@ test('apply registers every tool and disposes them together', () => {
 test('the preset composition parses and names the bundled plugin', () => {
   const composition = readFileSync(join(PACKAGE_DIR, 'preset', 'agent.cordis.yml'), 'utf8')
   assert.match(composition, /^- id: comfyui-control$/m)
-  assert.match(composition, /name: '\.\/dsh-comfyui-control\.js'/)
+  assert.match(composition, /name: '\.\/dsh-comfyui-control\/lib\/index\.js'/)
   assert.match(composition, /name: '@deepseek-ai\/dsh-persona'/)
   assert.match(composition, /- id: tool-fs$|name: '@deepseek-ai\/dsh-tool-fs'/m)
   const preset = readFileSync(join(PACKAGE_DIR, 'preset', 'preset.yml'), 'utf8')

@@ -48,11 +48,11 @@ test('the package preset composes through the loader dialect', () => {
   assert.equal(new Set(ids).size, ids.length, `duplicate row ids: ${ids.join(', ')}`)
   const plugin = rows.find((row) => row?.id === 'comfyui-control')
   assert.ok(plugin, 'the preset must mount the plugin')
-  assert.equal(plugin.name, './dsh-comfyui-control.js', 'the preset ships the bundled plugin beside itself')
+  assert.equal(plugin.name, './dsh-comfyui-control/lib/index.js', 'the preset ships the bundled plugin beside itself')
   // No row may declare a harness package this preset cannot resolve.
   for (const row of rows) {
     if (typeof row?.name !== 'string') continue
-    if (row.name === './dsh-comfyui-control.js' || row.name.startsWith('cordis:')) continue
+    if (row.name === './dsh-comfyui-control/lib/index.js' || row.name.startsWith('cordis:')) continue
     assert.match(row.name, /^@deepseek-ai\//, `${row.id} names a package the preset cannot resolve: ${row.name}`)
   }
 })

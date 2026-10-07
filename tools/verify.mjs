@@ -45,7 +45,7 @@ async function main() {
   // 2. the shipped preset composition
   const composition = readIfPresent(join(PACKAGE_DIR, 'preset', 'agent.cordis.yml'))
   check('preset composition exists', composition !== undefined)
-  check('composition mounts the bundled plugin', /name: '\.\/dsh-comfyui-control\.js'/.test(composition ?? ''))
+  check('composition mounts the bundled plugin', /name: '\.\/dsh-comfyui-control\/lib\/index\.js'/.test(composition ?? ''))
   check('composition declares the 绘图模式 persona', /- id: persona/.test(composition ?? ''))
   check('preset.yml declares 绘图模式', /^name: 绘图模式$/m.test(readIfPresent(join(PACKAGE_DIR, 'preset', 'preset.yml')) ?? ''))
   const presetGuide = join(PACKAGE_DIR, 'docs', 'LORA_GUIDE.md')
@@ -70,7 +70,7 @@ async function main() {
   if (installed) {
     const target = join(presetRoot, presetId)
     check('preset is installed', existsSync(target), target)
-    const bundlePath = join(target, 'dsh-comfyui-control.js')
+    const bundlePath = join(target, 'dsh-comfyui-control', 'lib', 'index.js')
     if (existsSync(bundlePath)) {
       const bundled = await import(`file:///${bundlePath.replace(/\\/g, '/')}?verify=${Date.now()}`)
       const installedNames = bundled.toolList().map((tool) => tool.name).sort()
@@ -81,6 +81,12 @@ async function main() {
         on: () => {},
       })
       check('installed bundle registers all tools', registered.length === tools.length, `registered ${registered.length}`)
+
+      // The installed bundle must resolve its own directory, not the build
+      // checkout: its pipeline has to live inside the preset directory.
+      const status = await bundled.toolList().find((tool) => tool.name === 'comfyui_status').execute({}, {})
+      check('installed bundle reports the preset directory as its own', status.pipeline.startsWith(target), status.pipeline)
+      check('installed preset ships the pipeline it reports', existsSync(status.pipeline) && status.pipeline_exists === true, status.pipeline)
     } else {
       check('installed bundle exists', false, bundlePath)
     }

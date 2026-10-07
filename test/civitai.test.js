@@ -415,7 +415,24 @@ describe('comfyui_download_lora', () => {
   test('a filename with a path separator is refused', async () => {
     await assert.rejects(byName.get('comfyui_download_lora').execute({ version_id: 1, filename: '../evil.safetensors' }, {}), /invalid filename/)
     await assert.rejects(byName.get('comfyui_download_lora').execute({ version_id: 1, filename: 'sub/evil.safetensors' }, {}), /invalid filename/)
-    await assert.rejects(byName.get('comfyui_download_lora').execute({ version_id: 1, filename: 'ok.safetensors', subdir: '../..' }, {}), /escapes/)
+    await assert.rejects(byName.get('comfyui_download_lora').execute({ version_id: 1, filename: 'ok.safetensors', subdir: '../..' }, {}), /invalid subdir|escapes/)
+    // A drive-qualified component stays inside models/loras after join, so it is
+    // rejected by name rather than by the resolved-prefix check.
+    await assert.rejects(byName.get('comfyui_download_lora').execute({ version_id: 1, filename: 'ok.safetensors', subdir: 'C:\\Windows\\Temp' }, {}), /invalid subdir|escapes/)
+  })
+
+  test('a string version_id from comfyui_search_lora is accepted', async () => {
+    const original = globalThis.fetch
+    globalThis.fetch = downloadStub(150_000)
+    try {
+      const result = await byName.get('comfyui_download_lora').execute({ version_id: '3023314', filename: 'by-string.safetensors' }, {})
+      assert.equal(result.valid_safetensors, true)
+      assert.equal(existsSync(join(COMFY_ROOT, 'models', 'loras', 'by-string.safetensors')), true)
+    } finally {
+      globalThis.fetch = original
+    }
+    await assert.rejects(byName.get('comfyui_download_lora').execute({ version_id: 'not-a-number', filename: 'x.safetensors' }, {}), /invalid version_id/)
+    await assert.rejects(byName.get('comfyui_download_lora').execute({ version_id: -1, filename: 'x.safetensors' }, {}), /invalid version_id/)
   })
 
   test('a valid download lands under models/loras and reports the upstream dict', async () => {

@@ -66,6 +66,9 @@
       - engine=krea2 走自然语言模型（8 步 CFG 1，er_sde/simple，默认 1024x1536）。
 
       # LoRA 规则
+      - 完整规范见《LORA_GUIDE.md》：安装器会在预设目录与状态目录各放一份，路径会写在安装输出里；
+        涉及 LoRA 选择/权重调节时先用 read 工具读它（按「分类体系 → 选择规则 → 权重规范 → 排查顺序」执行），
+        不要凭文件名乱配。用户自己的 LoRA 清单建议另存 `LORA_GUIDE.local.md`（同目录），本文件保持通用规范。
       - 不传 lora_text 时默认挂 5 件套：ushikani 0.3 画风 / darklight 0.3 氛围 /
         photo-background 0.6 写实背景 / RealSkin 0.8 皮肤 / surtr945 0.8 画风；传 "" 显式空载。
       - 权重铁律：画风 0.3-0.7、角色 0.6-1.0、氛围 0.3-0.8、皮肤 0.6-1.0；一次只调一个变量。
@@ -93,11 +96,12 @@
 # 18 个工具：自检/初始化清单/模型指南/模型列表/Anima+Krea2 出图/任意 workflow/
 # 历史/队列/节点查询/PNG 元数据/Ollama 识图/小番茄解混淆/Danbooru 角色 tag 与
 # 外貌统计/Civitai LoRA 检索下载与 by-hash 反查。
-# `tools/install-preset.mjs` 会把包内代码打包成 `dsh-comfyui-control.js` 放进
-# 预设目录，所以这一行只指向一个自包含文件，不依赖 harness 的 node_modules。
+# `tools/install-preset.mjs` 会把包内代码打包成
+# `dsh-comfyui-control/lib/index.js` 放进预设目录（保持包的目录形状，插件因此能
+# 正确解析自己的根目录），不依赖 harness 的 node_modules。
 
 - id: comfyui-control
-  name: './dsh-comfyui-control.js'
+  name: './dsh-comfyui-control/lib/index.js'
 
 # ── 视觉 ─────────────────────────────────────────────────────────────────────
 # 成图检查走宿主的 view_image（deepseek-v4-flash-vision-exp，NSFW 不审查）。
