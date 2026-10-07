@@ -58,6 +58,14 @@ check('the compare viewer ships with the bundle', existsSync(join(PACKAGE_DIR, '
 check('the package exposes the viewer as a script', JSON.parse(readFileSync(join(PACKAGE_DIR, 'package.json'), 'utf8')).scripts?.['serve-compare']?.includes('serve-compare.mjs'))
 check('the plugin reports the viewer as required', composition.includes('8899') || readFileSync(join(PACKAGE_DIR, 'lib', 'danbooru.js'), 'utf8').includes('8899'))
 
+// Every directory the plugin reads at runtime must be in the npm file list, or
+// the published tarball is missing files that resolve fine in a git checkout.
+const published = JSON.parse(readFileSync(join(PACKAGE_DIR, 'package.json'), 'utf8')).files ?? []
+for (const dir of ['lib', 'preset', 'repro']) {
+  check(`npm publishes ${dir}/`, published.includes(dir))
+}
+check('npm publishes the repro manifest', existsSync(join(PACKAGE_DIR, 'repro', 'samples.json')) && published.includes('repro'))
+
 const probes = [
   ['ComfyUI', `${process.env.COMFYUI_URL || 'http://127.0.0.1:8188'}/system_stats`],
   ['Ollama', `${process.env.OLLAMA_URL || 'http://127.0.0.1:11434'}/api/tags`],
