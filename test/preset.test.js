@@ -18,6 +18,8 @@ const PACKAGE_DIR = dirname(dirname(fileURLToPath(import.meta.url)))
 const DSH_HOME = process.env.DSH_HOME || join(homedir(), '.dsh')
 const SHIPPED_PRESETS = join(DSH_HOME, 'profiles', 'node_modules', '@deepseek-ai', 'dsh-agent-presets', 'presets')
 const USER_PRESETS = join(DSH_HOME, '.agent-presets')
+/** The directory `tools/install-preset.mjs` installs this preset into. */
+const INSTALLED_PRESET_ID = 'drawing'
 const PLUGIN_RE = /dsh-comfyui-control/i
 
 function loadYaml(path) {
@@ -34,7 +36,11 @@ function presetDirs() {
   for (const [root, prefix] of [[SHIPPED_PRESETS, 'shipped'], [USER_PRESETS, 'user']]) {
     if (!existsSync(root)) continue
     for (const entry of readdirSync(root, { withFileTypes: true })) {
-      if (entry.isDirectory()) dirs.push({ id: `${prefix}:${entry.name}`, dir: join(root, entry.name) })
+      if (!entry.isDirectory()) continue
+      // The installed copy of this very preset is the same composition, so it is
+      // not a second preset that names the plugin.
+      if (entry.name === INSTALLED_PRESET_ID) continue
+      dirs.push({ id: `${prefix}:${entry.name}`, dir: join(root, entry.name) })
     }
   }
   return dirs.filter(({ dir }) => existsSync(join(dir, 'agent.cordis.yml')))
