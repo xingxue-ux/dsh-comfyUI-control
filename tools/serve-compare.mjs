@@ -8,7 +8,7 @@
  *
  * Usage: node tools/serve-compare.mjs [--port 8899] [--host 127.0.0.1] [--dir <path>]
  */
-import { createReadStream, existsSync, statSync } from 'node:fs'
+import { createReadStream, existsSync, readdirSync, statSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { extname, join, normalize, resolve, sep } from 'node:path'
 import { COMPARE_DIR } from '../lib/env.js'
@@ -59,21 +59,37 @@ createServer((request, response) => {
     response.writeHead(404).end('not found')
     return
   }
-  const file = stats.isDirectory() ? join(target, 'index.html') : target
-  if (!existsSync(file) || statSync(file).isDirectory()) {
-    response.writeHead(404).end('not found')
+  if (stats.isDirectory()) {
+    const index = join(target, 'index.html')
+    if (existsSync(index)) {
+      serveFile(index)
+      return
+    }
+    // A directory without an index is the compare listing itself.
+    const listing = readdirSync(target)
+      .filter((name) => name.endsWith('.html') || name.endsWith('.png'))
+      .sort()
+      .reverse()
+    const body = '<!doctype html><meta charset="utf-8"><title>compare</title>'
+      + `<h1>${target}</h1><ul>${listing.map((name) => `<li><a href="${encodeURIComponent(name)}">${name}</a></li>`).join('')}</ul>`
+    response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
+    response.end(request.method === 'HEAD' ? undefined : body)
     return
   }
-  response.writeHead(200, {
-    'content-type': CONTENT_TYPES[extname(file).toLowerCase()] ?? 'application/octet-stream',
-    'content-length': statSync(file).size,
-    'cache-control': 'no-store',
-  })
-  if (request.method === 'HEAD') {
-    response.end()
-    return
+  serveFile(target)
+
+  function serveFile(file) {
+    response.writeHead(200, {
+      'content-type': CONTENT_TYPES[extname(file).toLowerCase()] ?? 'application/octet-stream',
+      'content-length': statSync(file).size,
+      'cache-control': 'no-store',
+    })
+    if (request.method === 'HEAD') {
+      response.end()
+      return
+    }
+    createReadStream(file).pipe(response)
   }
-  createReadStream(file).pipe(response)
 }).listen(options.port, options.host, () => {
   process.stdout.write(`compare viewer: http://${options.host}:${options.port}/  ->  ${root}\n`)
 })
