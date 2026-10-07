@@ -7,11 +7,24 @@
   "engines": {
     "node": ">=20.3"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xingxue-ux/dsh-comfyUI-control.git"
+  },
+  "homepage": "https://github.com/xingxue-ux/dsh-comfyUI-control#readme",
+  "bugs": {
+    "url": "https://github.com/xingxue-ux/dsh-comfyUI-control/issues"
+  },
   "files": [
     "cordis.patch.yml",
     "preset",
     "lib",
     "docs",
+    "tools/serve-compare.mjs",
+    "tools/build-bundle.mjs",
+    "tools/bundle.mjs",
+    "tools/verify.mjs",
+    "tools/verify-live.mjs",
     "pipeline.json",
     "README.md",
     "LICENSE"
@@ -25,13 +38,22 @@
     "build": "node tools/build-bundle.mjs",
     "test": "node --test \"test/*.test.js\"",
     "verify": "node tools/verify.mjs",
-    "serve-compare": "node tools/serve-compare.mjs"
+    "serve-compare": "node tools/serve-compare.mjs",
+    "prepack": "node tools/build-bundle.mjs"
   },
   "keywords": [
     "dsh",
     "deepseek-harness",
     "dsh-bundle",
     "agent-preset",
-    "comfyui"
+    "comfyui",
+    "comfyui-api",
+    "image-generation",
+    "anima",
+    "lora",
+    "civitai",
+    "danbooru",
+    "ollama",
+    "ai-agent"
   ]
 }
