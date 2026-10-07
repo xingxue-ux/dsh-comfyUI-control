@@ -1,0 +1,126 @@
+{
+ "1": {
+  "class_type": "UNETLoader",
+  "inputs": {
+   "unet_name": "anima-base-v1.0.safetensors",
+   "weight_dtype": "default"
+  }
+ },
+ "6": {
+  "class_type": "CLIPLoader",
+  "inputs": {
+   "clip_name": "qwen_3_06b_base.safetensors",
+   "type": "stable_diffusion",
+   "device": "cpu"
+  }
+ },
+ "11": {
+  "class_type": "VAELoader",
+  "inputs": {
+   "vae_name": "qwen_image_vae.safetensors"
+  }
+ },
+ "5": {
+  "class_type": "EmptyLatentImage",
+  "inputs": {
+   "width": 832,
+   "height": 1216,
+   "batch_size": 1
+  }
+ },
+ "48": {
+  "class_type": "UpscaleModelLoader",
+  "inputs": {
+   "model_name": "RealESRGAN_x2plus.pth"
+  }
+ },
+ "8": {
+  "class_type": "CLIPTextEncode",
+  "inputs": {
+   "clip": [
+    "6",
+    0
+   ],
+   "text": "masterpiece, best quality, newest, 1girl, solo"
+  },
+  "_meta": {
+   "title": "Positive"
+  }
+ },
+ "68": {
+  "class_type": "CLIPTextEncode",
+  "inputs": {
+   "clip": [
+    "6",
+    0
+   ],
+   "text": "worst quality, low quality, bad hands, bad anatomy"
+  },
+  "_meta": {
+   "title": "Negative"
+  }
+ },
+ "3": {
+  "class_type": "KSampler",
+  "inputs": {
+   "seed": 110661221469510,
+   "steps": 30,
+   "cfg": 4.0,
+   "sampler_name": "euler_ancestral",
+   "scheduler": "simple",
+   "denoise": 1.0,
+   "model": [
+    "1",
+    0
+   ],
+   "positive": [
+    "8",
+    0
+   ],
+   "negative": [
+    "68",
+    0
+   ],
+   "latent_image": [
+    "5",
+    0
+   ]
+  }
+ },
+ "7": {
+  "class_type": "VAEDecode",
+  "inputs": {
+   "samples": [
+    "3",
+    0
+   ],
+   "vae": [
+    "11",
+    0
+   ]
+  }
+ },
+ "50": {
+  "class_type": "ImageUpscaleWithModel",
+  "inputs": {
+   "upscale_model": [
+    "48",
+    0
+   ],
+   "image": [
+    "7",
+    0
+   ]
+  }
+ },
+ "49": {
+  "class_type": "SaveImage",
+  "inputs": {
+   "images": [
+    "50",
+    0
+   ],
+   "filename_prefix": "Anima/%year%-%month%-%day%/anima"
+  }
+ }
+}

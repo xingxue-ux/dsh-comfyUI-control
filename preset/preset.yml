@@ -1,0 +1,3 @@
+name: 绘图模式
+description: 本地 ComfyUI 出图专用：13 个 comfyui_* 工具（环境自检/模型列表/Anima+Krea2 出图/任意 workflow/历史/队列/节点查询/PNG 元数据复刻/Ollama 识图/小番茄解混淆/Danbooru 角色 tag/外观统计/Civitai LoRA 检索下载 by-hash 反查），默认 5 件套 LoRA 与 8899 对比页。
+order: 5

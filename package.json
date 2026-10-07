@@ -1,0 +1,44 @@
+{
+  "name": "dsh-comfyui-control",
+  "version": "0.1.0",
+  "description": "DeepSeek Harness plugin: drive a local ComfyUI from the 绘图模式 agent preset — Anima/Krea2 text-to-image, LoRA search, Danbooru character tags, image metadata, Ollama vision, 小番茄 de-obfuscation",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./preset": "./preset/agent.cordis.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "lib",
+    "preset",
+    "tools",
+    "pipeline.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node --test \"test/*.test.js\"",
+    "preset:install": "node tools/install-preset.mjs"
+  },
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "comfyui",
+    "agent-preset",
+    "plugin"
+  ],
+  "peerDependencies": {
+    "@deepseek-ai/dsh-tools": "*"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-tools": {
+      "optional": true
+    }
+  }
+}
