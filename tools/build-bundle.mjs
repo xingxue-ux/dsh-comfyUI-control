@@ -25,8 +25,6 @@ const METADATA = join(PACKAGE_DIR, 'preset', 'preset.yml')
 const PATCH = join(PACKAGE_DIR, 'cordis.patch.yml')
 const PLUGIN_ENTRY = join(PACKAGE_DIR, 'preset', 'dsh-comfyui-control', 'lib', 'index.js')
 const PRESET_ID = 'drawing'
-/** Where the plugin directory sits relative to this bundle's patch file. */
-const PLUGIN_SPECIFIER = './preset/dsh-comfyui-control/lib/index.js'
 
 function loadYaml() {
   const roots = [
@@ -57,18 +55,28 @@ const JsType = new yaml.Type('tag:yaml.org,2002:js', {
 })
 const schema = yaml.DEFAULT_SCHEMA.extend([JsType])
 
+/**
+ * Where the plugin sits relative to the profile directory.
+ *
+ * The Loader imports a relative row specifier as `new URL(name, ctx.baseUrl)`,
+ * and a profile-level loader's base URL is the profile directory — so the row
+ * names the plugin through the profile's own `node_modules` link. That is
+ * `ctx.baseUrl`'s documented meaning, and it keeps the row working wherever the
+ * bundle directory is checked out; `!!js` expressions cannot use
+ * `import.meta.url` here, because they are evaluated with `new Function`, not as
+ * a module.
+ */
+const PLUGIN_SPECIFIER = './node_modules/dsh-comfyui-control/preset/dsh-comfyui-control/lib/index.js'
+
+/** Plugin rows in the composition written with a package-local path. */
+const COMPOSITION_PLUGIN_PATH = './dsh-comfyui-control/lib/index.js'
+
 const plugins = yaml.load(readFileSync(COMPOSITION, 'utf8'), { schema })
 if (!Array.isArray(plugins)) throw new Error(`${COMPOSITION} must be a top-level list of plugin rows`)
 const metadata = yaml.load(readFileSync(METADATA, 'utf8'), { schema })
 
-// The loader does not resolve a relative row specifier against the patch file
-// once a bundle is installed (verified on 0.2.0-rc.2), so the row names a path
-// derived from the patch's own module URL. That keeps the bundle relocatable:
-// the store links or copies this directory and the expression follows it.
 const rows = plugins.map((row) =>
-  row?.name === './dsh-comfyui-control/lib/index.js'
-    ? { ...row, name: { __js: `new URL('${PLUGIN_SPECIFIER.slice(2)}', import.meta.url).href` } }
-    : row,
+  row?.name === COMPOSITION_PLUGIN_PATH ? { ...row, name: PLUGIN_SPECIFIER } : row,
 )
 
 const patch = [

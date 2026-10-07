@@ -93,7 +93,7 @@ git clone https://github.com/xingxue-ux/dsh-comfyUI-control
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
-| `COMFYUI_ROOT` | bundle 内探测（含 `models/` 的那一级） | ComfyUI 安装根目录；`models/`、`output/` 都在其下。兼容上游写法 `MODELS_ROOT`。**建议显式设置**，例如 `E:\AI\ComfyUI` |
+| `COMFYUI_ROOT` | 从插件位置向上探测含 `models/` 的那一级 | ComfyUI 安装根目录；`models/`、`output/` 都在其下。兼容上游写法 `MODELS_ROOT`。**强烈建议显式设置**，例如 `E:\AI\ComfyUI`：插件装在 bundle store 里时，它离你的 ComfyUI 安装目录很远，自动探测不到 |
 | `COMFYUI_URL` | `http://127.0.0.1:8188` | ComfyUI 地址 |
 | `PIPELINE` | bundle 内 `pipeline.json` | Anima 管线 workflow 路径 |
 | `COMFYUI_OUTPUT` | `<COMFYUI_ROOT>/output` | 出图目录（对比页复制源文件用） |
@@ -159,6 +159,27 @@ bundle store 里的预设行不保证能解析 harness 的 `@deepseek-ai/*` 包�
 （插件因此把 `dsh-comfyui-control/` 当作自己的根目录）。
 `lib/tool.js` 自带一份与 harness 等价的 schema 编译器与参数校验，
 `test/harness-schema.test.js` 对每个工具的编译结果和校验结果与 harness 真实实现逐一比对。
+
+## 预设行为什么是相对路径（0.2 的一个坑）
+
+预设里挂插件的那一行写成：
+
+```yaml
+- id: comfyui-control
+  name: './node_modules/dsh-comfyui-control/preset/dsh-comfyui-control/lib/index.js'
+```
+
+因为 0.2 的 Loader 对相对 specifier 做的是 `new URL(name, ctx.baseUrl)`，而 profile 级 Loader 的
+`ctx.baseUrl` 是 **profile 目录**，所以相对路径要相对 profile 目录来写（bundle 被 link 进
+profile 的 `node_modules`，所以这正好命中）。
+
+两个踩过的坑，写在这里省得再踩：
+
+- 文档里说的"插入行的相对路径锚定在 patch 文件旁"在 0.2.0-rc.2 上**不成立**（至少在 bundle
+  被 `install_bundle` 装配之后）：按包目录写的相对路径（如 `./preset/...`）解析不到。
+- 想在行里用 `!!js new URL(..., import.meta.url)` 也不行：`!!js` 表达式的求值方式是
+  `new Function('ctx', ...)`，里面**没有 `import.meta`**，表达式会抛错。
+  同理可用的是 loader 上下文提供的 `dshHomePath(...)`（例如 `!!js dshHomePath('sessions')`）。
 
 ## 开发与验证
 
