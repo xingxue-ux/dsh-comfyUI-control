@@ -1,9 +1,14 @@
 # dsh-comfyUI-control
 
+[![npm](https://img.shields.io/npm/v/dsh-comfyui-control.svg)](https://www.npmjs.com/package/dsh-comfyui-control)
+[![license](https://img.shields.io/npm/l/dsh-comfyui-control.svg)](LICENSE)
+
 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）**0.2 bundle**：
 把本地 ComfyUI 接进一个名为 **绘图模式** 的 Agent 预设里，完整复刻
 [`xingxue-ux/good-comfyui-mcp`](https://github.com/xingxue-ux/good-comfyui-mcp) 的 13 个工具，
 并补齐 ComfyUI 控制面，共 **18 个 `comfyui_*` 工具**。
+
+安装：`dsh plugin add --profile <profile> dsh-comfyui-control`（见[安装](#安装)）。
 
 **只在「绘图模式」预设里生效**：标准模式、极简模式、PTC 模式、创造模式等其他预设都不挂载这个插件，
 也就看不到任何 `comfyui_*` 工具。
@@ -40,28 +45,40 @@
 
 ## 安装
 
-### 1. 拿到 bundle 目录
+已发布到 npm：**[`dsh-comfyui-control`](https://www.npmjs.com/package/dsh-comfyui-control)**（`dsh.bundle.patch` 已声明，装进 profile 即自动成为一层 bundle）。
+
+### 方式一：npm / dsh plugin add（推荐）
+
+```bash
+dsh plugin add --profile <你的 profile> dsh-comfyui-control
+```
+
+它做三件事：pnpm 把包装进 `<DSH_HOME>/profiles/<profile>/node_modules/`、写完 `package.json` 依赖、
+并把 `dsh-comfyui-control` 追加到该 profile 的 `dsh.profile.bundles`。装完重启 DSH 即可。
+
+也可以手动把包放进 profile：在 profile 目录跑 `npm i dsh-comfyui-control`（或 `pnpm add`），
+再在 `package.json` 的 `dsh.profile.bundles` 里加上 `"dsh-comfyui-control"`。
+
+### 方式二：本地目录
 
 ```bash
 git clone https://github.com/xingxue-ux/dsh-comfyUI-control
 ```
 
-### 2. 用 plugin_manager 安装
-
 对 Agent 说：
 
 > 用 plugin_manager 安装 `E:\AI\ComfyUI\dsh-comfyUI-control` 这个 bundle（action: install_bundle）。
 
-也可以在「设置 → 插件」里安装同一个目录。装完后 `plugin_manager` 的 `list_bundles` 会列出它，
-`list_plugins` 里会出现 `preset-drawing` 行。
+也可以在「设置 → 插件」里安装同一个目录。
 
-### 3. 选择预设
+### 选择预设
 
-预设名 **绘图模式**（id `drawing`）。在 Agent 预设选择器里选它，或设为默认预设后新建会话。
+预设名 **绘图模式**（id `drawing`）。装完后 `plugin_manager` 的 `list_bundles` 会列出这个 bundle，
+`list_plugins` 里会出现 `preset-drawing` 行。在 Agent 预设选择器里选 **绘图模式**，或设为默认预设后新建会话。
 
 > 预设只对**新会话**生效；已在运行的会话保持启动时的插件版本。
 
-### 4. 环境依赖
+### 环境依赖
 
 | 依赖 | 必需 | 说明 |
 |---|---|---|
