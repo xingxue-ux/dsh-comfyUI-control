@@ -92,9 +92,9 @@ git clone https://github.com/xingxue-ux/dsh-comfyUI-control
 
 装好后在新会话里先调 `comfyui_status`，它会返回 `missing[]` 逐项告诉你缺什么。
 
-### 默认 5 件套 LoRA
+### 默认 5 件套 LoRA（**需要自己下载，插件不会自动拉**）
 
-`comfyui_generate` 不传 `lora_text` 时自动挂载（传 `lora_text=""` 显式空载）：
+`comfyui_generate` 不传 `lora_text` 时自动挂这 5 个；**本包不包含任何模型文件**，缺任何一个都会提交失败：
 
 | LoRA | 权重 | 用途 |
 |---|---|---|
@@ -103,6 +103,18 @@ git clone https://github.com/xingxue-ux/dsh-comfyUI-control
 | `anima-base-1-photo-background-v4.safetensors` | 0.6 | 写实背景 |
 | `RealSkin SliderV2.safetensors` | 0.8 | 写实皮肤 |
 | `surtr945_v1.safetensors` | 0.8 | 画风 |
+
+补齐方式（四选一）：
+
+1. **让 Agent 代下**（推荐，需要 `CIVITAI_TOKEN`）：
+   `comfyui_search_lora(filename='surtr945_v1.safetensors')` → `comfyui_download_lora(version_id=3023314, filename='surtr945_v1.safetensors')`
+   → `comfyui_lookup_lora_hash` 核对来源。内置 `KNOWN_EXACT` 表让这 5 个都能离线命中精确版。
+2. **自己下**：从 Civitai 下到 `<COMFYUI_ROOT>/models/loras/`，文件名保持一致。
+3. **不用默认套**：显式传 `lora_text=""` 空载，或传 `lora_text='<lora:你的LoRA:0.7>'` 覆盖。
+4. **补齐后复查**：`comfyui_status` 的 `default_loras.missing` 应为 `[]`，`models_ok` 才会是 `true`。
+
+> `comfyui_status` 会单独检查这 5 个文件（`default_loras.present/missing`）：它们不在 `pipeline.json` 里，
+> 是生成时动态注入的，所以不检查的话新装环境会误报 `ready: true`。
 
 ## 配置
 

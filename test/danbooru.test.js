@@ -368,22 +368,31 @@ test('lookupCharacterAppearance ranks a fetched page and caches it', async (t) =
   assert.equal(calls.filter((entry) => entry.includes('posts.json')).length, 1)
 })
 
-test('SETUP_STEPS is the 9-step DSH checklist', () => {
+test('SETUP_STEPS is the 10-step DSH checklist', () => {
   const steps = danbooru.SETUP_STEPS
-  assert.equal(steps.length, 9)
-  assert.deepEqual(steps.map((step) => step.step), [1, 2, 3, 4, 5, 6, 7, 8, 9])
+  assert.equal(steps.length, 10)
+  assert.deepEqual(steps.map((step) => step.step), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
   for (const step of steps) {
     assert.deepEqual(Object.keys(step), ['step', 'title', 'action', 'required', 'verify'])
     for (const field of ['title', 'action', 'verify']) assert.equal(typeof step[field], 'string')
     assert.equal(typeof step.required, 'boolean')
     assert.doesNotMatch(`${step.action} ${step.verify}`, /pip install|import mcp|requirements\.txt/)
   }
-  // 8899 is required; Civitai credentials and the vision service are not.
+  // 8899, the base models, the default 5-LoRA set and camofox are required;
+  // Civitai credentials and the vision service are not.
   const viewer = steps.find((step) => step.title.includes('8899'))
   assert.ok(viewer, 'the checklist names the required 8899 server')
   assert.equal(viewer.required, true)
   assert.match(viewer.action, /serve-compare/)
-  assert.deepEqual(steps.filter((step) => !step.required).map((step) => step.step), [7, 8])
+  const defaultLoras = steps.find((step) => step.title.includes('默认 5 件套'))
+  assert.ok(defaultLoras, 'the checklist tells the user to place the default 5-LoRA set')
+  assert.equal(defaultLoras.required, true)
+  for (const lora of ['ushikani_kassen_lora-000013', 'anima-darklight-style-v1-000194', 'RealSkin SliderV2', 'surtr945_v1']) {
+    assert.match(defaultLoras.action, new RegExp(lora.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+  }
+  assert.match(defaultLoras.action, /CIVITAI_TOKEN/)
+  assert.match(defaultLoras.action, /comfyui_download_lora/)
+  assert.deepEqual(steps.filter((step) => !step.required).map((step) => step.step), [8, 9])
   assert.equal(steps[0].title.includes('无 Python 依赖'), true)
   for (const name of ['comfyui_status', 'comfyui_generate']) {
     assert.ok(steps.some((step) => step.action.includes(name) || step.verify.includes(name)), `checklist must name ${name}`)
