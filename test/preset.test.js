@@ -82,16 +82,20 @@ test('the preset mounts the plugin by a path this bundle owns', { skip: skipYaml
   const plugins = row.config.plugins
   const control = plugins.find((plugin) => plugin?.id === 'comfyui-control')
   assert.ok(control, 'the preset must mount the plugin')
-  assert.equal(control.name, './preset/dsh-comfyui-control/lib/index.js')
+  // A bundle store moves this directory, so the row derives the plugin URL from
+  // the patch's own module URL instead of naming a path the store would break.
+  assert.deepEqual(control.name, { __js: "new URL('preset/dsh-comfyui-control/lib/index.js', import.meta.url).href" })
   // A bundle store does not resolve harness packages for a preset row.
   for (const plugin of plugins) {
-    if (typeof plugin?.name !== 'string') continue
+    if (plugin?.name === undefined) continue
+    if (typeof plugin.name === 'object') continue
     if (plugin.name.startsWith('./') || plugin.name.startsWith('cordis:')) continue
     assert.match(plugin.name, /^@deepseek-ai\//, `${plugin.id} names an unresolved package: ${plugin.name}`)
   }
   // `!!js` survives the round trip as the inline tag the loader expects.
   assert.match(readFileSync(PATCH, 'utf8'), /disabled: !!js process\.platform === 'win32'/)
   assert.match(readFileSync(PATCH, 'utf8'), /disabled: !!js process\.platform !== 'win32'/)
+  assert.match(readFileSync(PATCH, 'utf8'), /name: !!js new URL\('preset\/dsh-comfyui-control\/lib\/index\.js', import\.meta\.url\)\.href/)
 })
 
 test('the preset metadata is the 绘图模式 display text', () => {

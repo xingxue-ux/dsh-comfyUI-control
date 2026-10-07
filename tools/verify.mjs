@@ -28,7 +28,7 @@ const pluginPath = join(PACKAGE_DIR, 'preset', 'dsh-comfyui-control', 'lib', 'in
 check('package.json declares the bundle patch', manifest.dsh?.bundle?.patch === './cordis.patch.yml')
 check('the patch declares the preset-drawing row', /- id: preset-drawing\n\s+name: '@deepseek-ai\/dsh-agent-preset'/.test(patch))
 check('the declaration carries 绘图模式', /name: 绘图模式/.test(patch))
-check('the declaration mounts the plugin', /- id: comfyui-control\s+name: '?\.\/preset\/dsh-comfyui-control\/lib\/index\.js'?/.test(patch))
+check('the declaration mounts the plugin by its own module URL', /- id: comfyui-control\s+name: !!js new URL\('preset\/dsh-comfyui-control\/lib\/index\.js', import\.meta\.url\)\.href/.test(patch))
 check('loader expressions survived the build', patch.includes("!!js process.platform === 'win32'") && patch.includes("!!js process.platform !== 'win32'"))
 check('every plugin row names a resolvable package or an owned path', composition
   .split(/^- id: /m).slice(1)

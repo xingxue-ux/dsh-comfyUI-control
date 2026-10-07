@@ -61,10 +61,14 @@ const plugins = yaml.load(readFileSync(COMPOSITION, 'utf8'), { schema })
 if (!Array.isArray(plugins)) throw new Error(`${COMPOSITION} must be a top-level list of plugin rows`)
 const metadata = yaml.load(readFileSync(METADATA, 'utf8'), { schema })
 
-// The bundle installs the plugin as a dependency specifier, so the row has to
-// name a path this patch owns rather than a package the store cannot resolve.
+// The loader does not resolve a relative row specifier against the patch file
+// once a bundle is installed (verified on 0.2.0-rc.2), so the row names a path
+// derived from the patch's own module URL. That keeps the bundle relocatable:
+// the store links or copies this directory and the expression follows it.
 const rows = plugins.map((row) =>
-  row?.name === './dsh-comfyui-control/lib/index.js' ? { ...row, name: PLUGIN_SPECIFIER } : row,
+  row?.name === './dsh-comfyui-control/lib/index.js'
+    ? { ...row, name: { __js: `new URL('${PLUGIN_SPECIFIER.slice(2)}', import.meta.url).href` } }
+    : row,
 )
 
 const patch = [
