@@ -1,7 +1,7 @@
 {
   "name": "dsh-comfyui-control",
   "version": "0.1.1",
-  "description": "DeepSeek Harness 0.2 bundle: the 绘图模式 agent preset, whose 18 comfyui_* tools drive a local ComfyUI — Anima/Krea2 generation, LoRA search, Danbooru tags, PNG metadata, Ollama vision, 小番茄 de-obfuscation",
+  "description": "DeepSeek Harness 0.2 bundle: the 绘图模式 agent preset, whose 18 comfyui_* tools drive a local ComfyUI — Anima/Krea2 generation, LoRA search, Danbooru tags, PNG metadata, 小番茄 de-obfuscation",
   "type": "module",
   "license": "MIT",
   "engines": {
@@ -24,7 +24,8 @@
   "scripts": {
     "build": "node tools/build-bundle.mjs",
     "test": "node --test \"test/*.test.js\"",
-    "verify": "node tools/verify.mjs"
+    "verify": "node tools/verify.mjs",
+    "serve-compare": "node tools/serve-compare.mjs"
   },
   "keywords": [
     "dsh",

@@ -378,7 +378,12 @@ test('SETUP_STEPS is the 9-step DSH checklist', () => {
     assert.equal(typeof step.required, 'boolean')
     assert.doesNotMatch(`${step.action} ${step.verify}`, /pip install|import mcp|requirements\.txt/)
   }
-  assert.deepEqual(steps.filter((step) => !step.required).map((step) => step.step), [5, 7, 8])
+  // 8899 is required; Civitai credentials and the vision service are not.
+  const viewer = steps.find((step) => step.title.includes('8899'))
+  assert.ok(viewer, 'the checklist names the required 8899 server')
+  assert.equal(viewer.required, true)
+  assert.match(viewer.action, /serve-compare/)
+  assert.deepEqual(steps.filter((step) => !step.required).map((step) => step.step), [7, 8])
   assert.equal(steps[0].title.includes('无 Python 依赖'), true)
   for (const name of ['comfyui_status', 'comfyui_generate']) {
     assert.ok(steps.some((step) => step.action.includes(name) || step.verify.includes(name)), `checklist must name ${name}`)

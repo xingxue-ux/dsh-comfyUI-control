@@ -53,10 +53,16 @@ for (const file of ['pipeline.json', 'LORA_GUIDE.md']) {
   check(`the plugin ships ${file}`, existsSync(join(PACKAGE_DIR, 'preset', 'dsh-comfyui-control', file)))
 }
 
+// 8899 is a required dependency, so the viewer ships with the bundle.
+check('the compare viewer ships with the bundle', existsSync(join(PACKAGE_DIR, 'tools', 'serve-compare.mjs')))
+check('the package exposes the viewer as a script', JSON.parse(readFileSync(join(PACKAGE_DIR, 'package.json'), 'utf8')).scripts?.['serve-compare']?.includes('serve-compare.mjs'))
+check('the plugin reports the viewer as required', composition.includes('8899') || readFileSync(join(PACKAGE_DIR, 'lib', 'danbooru.js'), 'utf8').includes('8899'))
+
 const probes = [
   ['ComfyUI', `${process.env.COMFYUI_URL || 'http://127.0.0.1:8188'}/system_stats`],
   ['Ollama', `${process.env.OLLAMA_URL || 'http://127.0.0.1:11434'}/api/tags`],
   ['camofox-browser', `${process.env.CAMOFOX_URL || 'http://127.0.0.1:9377'}/health`],
+  ['compare viewer', `${process.env.COMFYUI_VIEW_BASE || 'http://127.0.0.1:8899'}/`],
 ]
 for (const [name, url] of probes) {
   try {

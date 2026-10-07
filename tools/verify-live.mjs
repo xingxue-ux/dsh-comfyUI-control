@@ -59,6 +59,9 @@ if (image) {
   const encoded = image.replace(/\.png$/i, '_enc.png')
   await call('comfyui_deconfuse_image', { image_path: image, mode: 'enc', times: 1, out_path: encoded })
   await call('comfyui_deconfuse_image', { image_path: encoded, mode: 'dec', times: 1 })
+  // Vision is opt-in: the disabled default must return the explanation and
+  // touch nothing. The enabled route needs the host services, so it is exercised
+  // by the test suite's stubs rather than here.
   await call('comfyui_describe_image', { image_path: image, question: '用一句话描述这张图。' })
 } else {
   process.stdout.write(`\n(no PNG under ${outputDir()})\n`)

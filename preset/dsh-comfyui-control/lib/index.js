@@ -5,9 +5,9 @@
 // own directory instead of the machine that built it.
 import { existsSync, readFileSync, mkdirSync, readdirSync, statSync, writeFileSync, copyFileSync, closeSync, openSync, readSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { dirname, isAbsolute, join, resolve, basename, sep, extname } from 'node:path'
+import { dirname, isAbsolute, join, resolve, basename, extname, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { inflateSync, deflateSync } from 'node:zlib'
+import { deflateSync, inflateSync } from 'node:zlib'
 import { spawn } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 
@@ -518,6 +518,805 @@ const sleep = exports.sleep = function sleep(ms, signal) {
 
 }
 __moduleInit[3] = function module3(exports, url) {
+/**
+ * Optional host services the plugin borrows at runtime.
+ *
+ * The plugin publishes tools only, so it never provides a service and never
+ * needs an isolate realm; the host services it uses are read through `ctx.get`
+ * and stashed here because a tool body receives execution data, not the plugin
+ * context. Everything is optional — a missing service degrades to a clear
+ * diagnostic instead of failing plugin activation.
+ */
+
+/** @type {{ llm?: object, attachments?: object }} */
+const host = {}
+
+const setHostServices = exports.setHostServices = function setHostServices(services) {
+  host.llm = services.llm
+  host.attachments = services.attachments
+}
+
+/** Overwrite for tests; returns the previous slot values. */
+const setHostServicesForTest = exports.setHostServicesForTest = function setHostServicesForTest(services) {
+  const previous = { llm: host.llm, attachments: host.attachments }
+  setHostServices(services)
+  return previous
+}
+
+const hostLlm = exports.hostLlm = function hostLlm() {
+  return host.llm
+}
+
+const hostAttachments = exports.hostAttachments = function hostAttachments() {
+  return host.attachments
+}
+
+}
+__moduleInit[4] = function module4(exports, url) {
+/**
+ * Dependency-free PNG codec over node:zlib.
+ *
+ * `decodePng` expands every supported PNG to 8-bit RGB or RGBA: gray samples
+ * are replicated, palette entries come from PLTE (+ tRNS alpha), 16-bit samples
+ * keep their most significant byte, and 1/2/4-bit gray is scaled by 255/max.
+ * The output has 4 channels exactly when the source carries alpha (colour type
+ * 4/6, or a tRNS chunk); everything else is RGB. Adam7 interlacing is rejected
+ * because a space-filling-curve permutation needs the whole pixel grid.
+ *
+ * `encodePng` writes one filter-0 IDAT and can re-attach the input's original
+ * tEXt/iTXt/zTXt chunks verbatim, which is what `preserve_meta` needs. Only
+ * 8-bit RGB/RGBA is written, matching the upstream PIL `convert('RGB')` path.
+ */
+/* import from node:zlib is hoisted to the file head */
+
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+const TEXT_TYPES = new Set(['tEXt', 'iTXt', 'zTXt'])
+const METADATA_KEYS = new Set(['parameters', 'prompt', 'workflow', 'Comment', 'Description'])
+/** Samples per pixel, and the bit depths this codec understands, per colour type. */
+const SAMPLES = { 0: 1, 2: 3, 3: 1, 4: 2, 6: 4 }
+const DEPTHS = { 0: [1, 2, 4, 8, 16], 2: [8, 16], 3: [1, 2, 4, 8], 4: [8, 16], 6: [8, 16] }
+
+const CRC_TABLE = (() => {
+  const table = new Uint32Array(256)
+  for (let n = 0; n < 256; n++) {
+    let c = n
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1
+    table[n] = c >>> 0
+  }
+  return table
+})()
+
+function crc32(bytes) {
+  let c = 0xffffffff
+  for (let i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xff] ^ (c >>> 8)
+  return (c ^ 0xffffffff) >>> 0
+}
+
+function chunk(type, payload) {
+  const data = Buffer.from(payload)
+  const out = Buffer.alloc(data.length + 12)
+  out.writeUInt32BE(data.length, 0)
+  out.write(type, 4, 'latin1')
+  data.copy(out, 8)
+  out.writeUInt32BE(crc32(out.subarray(4, 8 + data.length)), 8 + data.length)
+  return out
+}
+
+function paeth(left, up, upLeft) {
+  const p = left + up - upLeft
+  const pa = Math.abs(p - left)
+  const pb = Math.abs(p - up)
+  const pc = Math.abs(p - upLeft)
+  if (pa <= pb && pa <= pc) return left
+  return pb <= pc ? up : upLeft
+}
+
+/** Undo the per-row PNG filters in place; `bpp` is at least one byte. */
+function unfilter(raw, height, bytesPerRow, bpp) {
+  const stride = bytesPerRow + 1
+  for (let y = 0; y < height; y++) {
+    const base = y * stride
+    const filter = raw[base]
+    if (filter === 0) continue
+    const row = raw.subarray(base + 1, base + 1 + bytesPerRow)
+    const prev = y === 0 ? undefined : raw.subarray(base - stride + 1, base - stride + 1 + bytesPerRow)
+    if (filter === 1) {
+      for (let i = bpp; i < bytesPerRow; i++) row[i] = (row[i] + row[i - bpp]) & 0xff
+    } else if (filter === 2) {
+      if (!prev) continue
+      for (let i = 0; i < bytesPerRow; i++) row[i] = (row[i] + prev[i]) & 0xff
+    } else if (filter === 3) {
+      for (let i = 0; i < bytesPerRow; i++) {
+        const left = i >= bpp ? row[i - bpp] : 0
+        const up = prev ? prev[i] : 0
+        row[i] = (row[i] + ((left + up) >> 1)) & 0xff
+      }
+    } else if (filter === 4) {
+      for (let i = 0; i < bytesPerRow; i++) {
+        const left = i >= bpp ? row[i - bpp] : 0
+        const up = prev ? prev[i] : 0
+        const upLeft = prev && i >= bpp ? prev[i - bpp] : 0
+        row[i] = (row[i] + paeth(left, up, upLeft)) & 0xff
+      }
+    } else {
+      throw new Error(`unknown PNG filter type ${filter} on row ${y}`)
+    }
+  }
+}
+
+/** One filtered scanline to raw sample values (MSB first for sub-byte depths). */
+function expandRow(row, width, bitDepth, samplesPerPixel) {
+  const samples = new Uint16Array(width * samplesPerPixel)
+  if (bitDepth === 8) {
+    for (let i = 0; i < samples.length; i++) samples[i] = row[i]
+    return samples
+  }
+  if (bitDepth === 16) {
+    for (let i = 0; i < samples.length; i++) samples[i] = (row[i * 2] << 8) | row[i * 2 + 1]
+    return samples
+  }
+  const perByte = 8 / bitDepth
+  const mask = (1 << bitDepth) - 1
+  for (let i = 0; i < samples.length; i++) {
+    const shift = 8 - bitDepth - (i % perByte) * bitDepth
+    samples[i] = (row[Math.floor(i / perByte)] >> shift) & mask
+  }
+  return samples
+}
+
+function gray8(value, bitDepth) {
+  if (bitDepth === 16) return value >> 8
+  if (bitDepth === 8) return value
+  return (value * 255) / ((1 << bitDepth) - 1)
+}
+
+/** Walk the chunk stream; rejects a foreign or truncated file. Chunk CRCs are ignored on read. */
+const parsePng = exports.parsePng = function parsePng(buffer) {
+  const data = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer)
+  if (data.length < 8 || !data.subarray(0, 8).equals(PNG_SIGNATURE)) throw new Error('not a PNG file (bad signature)')
+  const chunks = []
+  let pos = 8
+  while (pos + 12 <= data.length) {
+    const length = data.readUInt32BE(pos)
+    const type = data.toString('latin1', pos + 4, pos + 8)
+    if (pos + 12 + length > data.length) throw new Error(`truncated PNG ${type} chunk at byte ${pos}`)
+    chunks.push({ type, data: data.subarray(pos + 8, pos + 8 + length) })
+    pos += 12 + length
+    if (type === 'IEND') break
+  }
+  const ihdr = chunks.find((entry) => entry.type === 'IHDR')
+  if (!ihdr || ihdr.data.length < 13) throw new Error('PNG is missing its IHDR chunk')
+  const width = ihdr.data.readUInt32BE(0)
+  const height = ihdr.data.readUInt32BE(4)
+  const bitDepth = ihdr.data[8]
+  const colorType = ihdr.data[9]
+  const interlace = ihdr.data[12]
+  if (interlace !== 0) throw new Error('interlaced (Adam7) PNG is not supported')
+  return { width, height, bitDepth, colorType, interlace, chunks, textChunks: chunks.filter((entry) => TEXT_TYPES.has(entry.type)) }
+}
+
+const decodePng = exports.decodePng = function decodePng(buffer) {
+  const png = parsePng(buffer)
+  const { width, height, bitDepth, colorType } = png
+  const samplesPerPixel = SAMPLES[colorType]
+  if (!samplesPerPixel) throw new Error(`unsupported PNG colour type ${colorType}`)
+  if (!DEPTHS[colorType].includes(bitDepth)) throw new Error(`unsupported PNG bit depth ${bitDepth} for colour type ${colorType}`)
+  if (width === 0 || height === 0) throw new Error(`PNG has an empty image (${width}x${height})`)
+
+  const idat = png.chunks.filter((entry) => entry.type === 'IDAT').map((entry) => entry.data)
+  if (idat.length === 0) throw new Error('PNG is missing its IDAT chunk')
+  const raw = inflateSync(Buffer.concat(idat))
+  const bytesPerRow = Math.ceil((width * samplesPerPixel * bitDepth) / 8)
+  const stride = bytesPerRow + 1
+  if (raw.length < stride * height) throw new Error(`PNG IDAT is truncated (${raw.length} of ${stride * height} bytes)`)
+  unfilter(raw, height, bytesPerRow, Math.max(1, Math.ceil((samplesPerPixel * bitDepth) / 8)))
+
+  const palette = png.chunks.find((entry) => entry.type === 'PLTE')?.data
+  const trns = png.chunks.find((entry) => entry.type === 'tRNS')?.data
+  if (colorType === 3 && !palette) throw new Error('palette PNG is missing its PLTE chunk')
+  const alpha = colorType === 4 || colorType === 6 || trns !== undefined
+  const channels = alpha ? 4 : 3
+  const out = new Uint8Array(width * height * channels)
+  // tRNS colour-key sample for gray (0) and RGB (2), two bytes per sample whatever
+  // the bit depth; palette tRNS is a per-index alpha table instead.
+  const grayKey = colorType === 0 && trns ? (trns[0] << 8) | trns[1] : -1
+  const rgbKey = colorType === 2 && trns ? [(trns[0] << 8) | trns[1], (trns[2] << 8) | trns[3], (trns[4] << 8) | trns[5]] : undefined
+
+  let o = 0
+  for (let y = 0; y < height; y++) {
+    const row = raw.subarray(y * stride + 1, y * stride + 1 + bytesPerRow)
+    const s = expandRow(row, width, bitDepth, samplesPerPixel)
+    if (colorType === 0) {
+      for (let x = 0; x < width; x++) {
+        const value = s[x]
+        const v = gray8(value, bitDepth)
+        out[o++] = v
+        out[o++] = v
+        out[o++] = v
+        if (channels === 4) out[o++] = value === grayKey ? 0 : 255
+      }
+    } else if (colorType === 2) {
+      for (let x = 0; x < width; x++) {
+        const i = x * 3
+        const r = bitDepth === 16 ? s[i] >> 8 : s[i]
+        const g = bitDepth === 16 ? s[i + 1] >> 8 : s[i + 1]
+        const b = bitDepth === 16 ? s[i + 2] >> 8 : s[i + 2]
+        out[o++] = r
+        out[o++] = g
+        out[o++] = b
+        if (channels === 4) out[o++] = rgbKey && s[i] === rgbKey[0] && s[i + 1] === rgbKey[1] && s[i + 2] === rgbKey[2] ? 0 : 255
+      }
+    } else if (colorType === 3) {
+      for (let x = 0; x < width; x++) {
+        const index = s[x]
+        const p = index * 3
+        if (p + 3 > palette.length) throw new Error(`palette index ${index} is out of range`)
+        out[o++] = palette[p]
+        out[o++] = palette[p + 1]
+        out[o++] = palette[p + 2]
+        if (channels === 4) out[o++] = index < (trns?.length ?? 0) ? trns[index] : 255
+      }
+    } else if (colorType === 4) {
+      for (let x = 0; x < width; x++) {
+        const v = gray8(s[x * 2], bitDepth)
+        out[o++] = v
+        out[o++] = v
+        out[o++] = v
+        out[o++] = bitDepth === 16 ? s[x * 2 + 1] >> 8 : s[x * 2 + 1]
+      }
+    } else {
+      for (let x = 0; x < width; x++) {
+        const i = x * 4
+        if (bitDepth === 16) {
+          out[o++] = s[i] >> 8
+          out[o++] = s[i + 1] >> 8
+          out[o++] = s[i + 2] >> 8
+          out[o++] = s[i + 3] >> 8
+        } else {
+          out[o++] = s[i]
+          out[o++] = s[i + 1]
+          out[o++] = s[i + 2]
+          out[o++] = s[i + 3]
+        }
+      }
+    }
+  }
+  return { width, height, channels, data: out }
+}
+
+const encodePng = exports.encodePng = function encodePng({ width, height, channels, data }, { textChunks = [] } = {}) {
+  if (channels !== 3 && channels !== 4) throw new Error(`encodePng writes 3 (RGB) or 4 (RGBA) channels, got ${channels}`)
+  const stride = width * channels
+  if (data.length < stride * height) throw new Error(`pixel buffer is short (${data.length} of ${stride * height} bytes)`)
+  const raw = Buffer.alloc((stride + 1) * height)
+  for (let y = 0; y < height; y++) Buffer.from(data.buffer, data.byteOffset + y * stride, stride).copy(raw, y * (stride + 1) + 1)
+  const ihdr = Buffer.alloc(13)
+  ihdr.writeUInt32BE(width, 0)
+  ihdr.writeUInt32BE(height, 4)
+  ihdr[8] = 8
+  ihdr[9] = channels === 4 ? 6 : 2
+  const parts = [PNG_SIGNATURE, chunk('IHDR', ihdr)]
+  for (const entry of textChunks) parts.push(chunk(entry.type, entry.data))
+  parts.push(chunk('IDAT', deflateSync(raw)), chunk('IEND', Buffer.alloc(0)))
+  return Buffer.concat(parts)
+}
+
+/** Split a text chunk payload into its keyword and value, inflating zTXt/iTXt. */
+function textChunkValue({ type, data }) {
+  const nul = data.indexOf(0)
+  if (nul < 0) return { key: '', value: data.toString('utf8') }
+  const key = data.toString('latin1', 0, nul)
+  if (type === 'tEXt') return { key, value: data.toString('utf8', nul + 1) }
+  if (type === 'zTXt') {
+    if (data[nul + 1] !== 0) return undefined
+    try {
+      return { key, value: inflateSync(data.subarray(nul + 2)).toString('utf8') }
+    } catch {
+      return undefined
+    }
+  }
+  const compressed = data[nul + 1] === 1
+  let cursor = data.indexOf(0, nul + 3)
+  if (cursor < 0) return undefined
+  cursor = data.indexOf(0, cursor + 1)
+  if (cursor < 0) return { key, value: '' }
+  const text = data.subarray(cursor + 1)
+  try {
+    return { key, value: compressed ? inflateSync(text).toString('utf8') : text.toString('utf8') }
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * The metadata dict `comfyui_extract_image_info` reports: ComfyUI writes
+ * `prompt`/`workflow` tEXt pairs, WebUI/NovelAI a single `parameters` chunk.
+ * `prompt`/`workflow` stay whole so the caller can parse them; the rest are
+ * trimmed to 2000 characters, as upstream does.
+ */
+const readTextMetadata = exports.readTextMetadata = function readTextMetadata(buffer) {
+  const metadata = {}
+  for (const entry of parsePng(buffer).textChunks) {
+    const decoded = textChunkValue(entry)
+    if (!decoded || !METADATA_KEYS.has(decoded.key)) continue
+    metadata[decoded.key] = decoded.key === 'prompt' || decoded.key === 'workflow' ? decoded.value : decoded.value.slice(0, 2000)
+  }
+  return metadata
+}
+
+}
+__moduleInit[5] = function module5(exports, url) {
+/**
+ * 小番茄混淆 (Gilbert curve pixel permutation) — port of xfq_tool.py.
+ *
+ * `gilbertCurve(w, h)` enumerates every pixel of the w×h grid exactly once. The
+ * golden-ratio offset `L = round((sqrt(5)-1)/2 * w*h)` shifts that enumeration,
+ * and one pass either writes pixel `u[s]` to `u[(s+L) % d]` (`enc`) or reads it
+ * from there (`dec`), so `dec` is the exact inverse of `enc`. Repeating the
+ * permutation `times` times matches `xfq_tool.py --times N`.
+ */
+
+const gilbertCurve = exports.gilbertCurve = function gilbertCurve(w, h) {
+  // A zero or negative extent has no pixels; without this the recursion never
+  // reaches its base case. Such an image is rejected before it gets here, but
+  // the helper is exported.
+  if (!Number.isInteger(w) || !Number.isInteger(h) || w <= 0 || h <= 0) return []
+  const points = []
+  const walk = (t, n, e, o, c, a) => {
+    const m = Math.abs(e + o)
+    const l = Math.abs(c + a)
+    const u = Math.sign(e)
+    const d = Math.sign(o)
+    const L = Math.sign(c)
+    const s = Math.sign(a)
+    if (l === 1) {
+      for (let i = 0; i < m; i++) {
+        points.push([t, n])
+        t += u
+        n += d
+      }
+      return
+    }
+    if (m === 1) {
+      for (let i = 0; i < l; i++) {
+        points.push([t, n])
+        t += L
+        n += s
+      }
+      return
+    }
+    let ph = Math.floor(e / 2)
+    let pg = Math.floor(o / 2)
+    let pi = Math.floor(c / 2)
+    let pf = Math.floor(a / 2)
+    if (2 * m > 3 * l) {
+      if (Math.abs(ph + pg) % 2 === 1 && m > 2) {
+        ph += u
+        pg += d
+      }
+      walk(t, n, ph, pg, c, a)
+      walk(t + ph, n + pg, e - ph, o - pg, c, a)
+    } else {
+      if (Math.abs(pi + pf) % 2 === 1 && l > 2) {
+        pi += L
+        pf += s
+      }
+      walk(t, n, pi, pf, ph, pg)
+      walk(t + pi, n + pf, e, o, c - pi, a - pf)
+      walk(t + (e - u) + (pi - L), n + (o - d) + (pf - s), -pi, -pf, -(e - ph), -(o - pg))
+    }
+  }
+  if (w >= h) walk(0, 0, w, 0, 0, h)
+  else walk(0, 0, 0, h, w, 0)
+  return points
+}
+
+/** One enc/dec pass. `image` is `{width, height, channels, data}` (row major). */
+const xfqTransform = exports.xfqTransform = function xfqTransform({ width, height, channels, data }, mode) {
+  if (mode !== 'enc' && mode !== 'dec') throw new Error(`mode must be 'enc' or 'dec', got ${mode}`)
+  const pixels = width * height
+  // Python's round() is half-to-even, but (sqrt(5)-1)/2 * d never lands on an
+  // exact .5 for any pixel count, so Math.round gives the same L.
+  const offset = Math.round(((Math.sqrt(5) - 1) / 2) * pixels)
+  const curve = gilbertCurve(width, height)
+  if (curve.length !== pixels) throw new Error(`Gilbert curve covered ${curve.length} of ${pixels} pixels for ${width}x${height}`)
+  const order = new Uint32Array(pixels)
+  for (let s = 0; s < pixels; s++) order[s] = curve[s][0] + curve[s][1] * width
+  const out = new Uint8Array(data.length)
+  let shifted = offset % pixels
+  if (mode === 'enc') {
+    for (let s = 0; s < pixels; s++) {
+      const from = order[s] * channels
+      const to = order[shifted] * channels
+      for (let k = 0; k < channels; k++) out[to + k] = data[from + k]
+      if (++shifted === pixels) shifted = 0
+    }
+  } else {
+    for (let s = 0; s < pixels; s++) {
+      const to = order[s] * channels
+      const from = order[shifted] * channels
+      for (let k = 0; k < channels; k++) out[to + k] = data[from + k]
+      if (++shifted === pixels) shifted = 0
+    }
+  }
+  return { width, height, channels, data: out }
+}
+
+/** `xfq_tool.py --times N`: N passes in the same direction. */
+const transformTimes = exports.transformTimes = function transformTimes(image, mode, times) {
+  let current = image
+  for (let i = 0; i < times; i++) current = xfqTransform(current, mode)
+  return current
+}
+}
+__moduleInit[6] = function module6(exports, url) {
+/**
+ * Image description + 小番茄 de-obfuscation tools.
+ *
+ * `comfyui_describe_image` has two routes, and the tool is **off by default**:
+ * the session's own model is usually multimodal, so the caller is expected to
+ * read the image itself (`read_image`) unless it explicitly turns this tool on.
+ * When enabled, the host vision model (`deepseek-v4.1-flash` on `opencode-go`,
+ * falling back to other vision-capable host models) is preferred; an explicit
+ * Ollama model name keeps the upstream path (default qwen3-vl:8b, which answers
+ * Chinese but refuses NSFW, with an automatic llava:7b retry).
+ *
+ * `comfyui_deconfuse_image` is a port of the upstream `deconfuse_image` plus the
+ * full `xfq_tool.py` surface it drives: the Gilbert-curve permutation in
+ * lib/xfq.js, `--times`, `--mode` and `--preserve-meta`.
+ */
+/* import from node:fs is hoisted to the file head */
+/* import from node:path is hoisted to the file head */
+const { OLLAMA_URL, STATE_DIR, outputDir, resolveUserPath } = __modules[1].exports;
+const { HttpError, postJson } = __modules[2].exports;
+const { decodePng, encodePng, parsePng } = __modules[4].exports;
+const { hostAttachments, hostLlm } = __modules[3].exports;
+const { defineTool } = __modules[0].exports;
+const { transformTimes } = __modules[5].exports;
+
+const MAIN_MODEL = 'qwen3-vl:8b'
+const FALLBACK_MODEL = 'llava:7b'
+/** Upstream's detail path refuses on all six keywords; its single-question path omits 健康积极. */
+const REFUSAL_KEYWORDS = ['无法提供', '不能', '抱歉', '不当内容', '公序良俗', '健康积极']
+/** The single-question path uses upstream's five keywords; 健康积极 is detail-mode only. */
+const REFUSAL_KEYWORDS_SINGLE = ['无法提供', '不能', '抱歉', '不当内容', '公序良俗']
+const DEFAULT_QUESTION = '请详细描述这张图片，用中文：1) 角色外貌（发型、发色、瞳色、体型）2) 服装 3) 姿势/动作 4) 场景背景 5) 视角构图 6) 画风。'
+const FALLBACK_QUESTION = 'Describe this image in detail: character appearance, clothing, pose, background, art style.'
+const DETAIL_SUFFIX = '请详细列举，不要省略任何细节，分点回答。'
+const DETAIL_QUESTIONS = [
+  '头发：发色（含渐变层次）、发型、长度、发饰配件（蝴蝶结/发夹/猫耳等）？',
+  '眼睛：瞳色、眼型、表情细节（眼神、眉毛、嘴型）？',
+  '体型与皮肤：体型特征、肤色、特殊标记（纹身/伤痕/痣）？',
+  '服装：从上到下逐件描述（上衣/下装/袜子/鞋子）、材质、颜色、装饰、配饰（首饰/项圈/腰带）？',
+  '手持物与道具：角色拿着或身边有什么道具？',
+  '姿势：全身姿势细节（手/腿/头的位置和角度）、重心？',
+  '场景：环境（室内/室外、具体场所、家具/建筑）、光线来源与方向、色调？',
+  '背景分层：前景/中景/背景各有什么元素？虚化程度如何？',
+  '构图：视角（俯视/仰视/平视）、景别（特写/近景/中景/全景）、人物在画面中的位置、留白情况？',
+  '画风：具体风格（赛璐璐/厚涂/水彩/3D渲染）、线条特点、上色方式？',
+  '画面文字/水印/特效：有没有文字、水印、光效、粒子、飘落物？',
+]
+const DETAIL_FALLBACK_QUESTIONS = [
+  'Hair: exact hair color, hairstyle, length, any hair accessories?',
+  'Eyes: eye color, eye shape, expression?',
+  'Body: body type, skin details, what is she wearing exactly (top, bottom, shoes)?',
+  'Pose: exact body position, what is she doing with her hands, legs, head?',
+  'Objects: list every object visible in the image (furniture, props, food, toys)?',
+  'Scene: indoor or outdoor, what room, background details, lighting?',
+  'Art style: 2D anime, 3D, painterly, line art? Color palette?',
+  'Camera angle: is the camera at eye level, looking up from below (low angle), or looking down from above (high angle)?',
+  'Zoom level: is it a close-up, medium shot, waist-up, full body, or wide shot?',
+  'Framing: where is the character positioned in the frame (center, left, right)? Is there much empty space around her?',
+  'Perspective: is she seen from the front, side, three-quarter view, or from behind?',
+]
+/** The upstream gives each Ollama request 900 seconds. */
+const REQUEST_TIMEOUT_MS = 900_000
+/** Upper bound on de-obfuscation passes; each one is a full synchronous pixel walk. */
+const MAX_TIMES = 64
+
+/**
+ * Vision is off unless the caller turns it on.
+ *
+ * The session's own model is usually already multimodal, so paying for a second
+ * vision route on every describe call is the wrong default. `DSH_COMFYUI_VISION=1`
+ * turns it on for a deployment without changing how the model calls the tool.
+ */
+function visionEnabled(args) {
+  if (args.enable_vision === true) return true
+  if (args.enable_vision === false) return false
+  return /^(1|true|yes|on)$/i.test(process.env.DSH_COMFYUI_VISION ?? '')
+}
+
+const VISION_DISABLED_MESSAGE = [
+  '视觉服务默认关闭，没有发起任何识图请求。',
+  '你（当前会话模型）很可能已经是多模态模型：直接调用宿主的 read_image 看图，比走第二个视觉服务更快也更准。',
+  '确实需要这个工具代识别图时，显式传 enable_vision=true（或在 DSH 进程里设 DSH_COMFYUI_VISION=1）。',
+].join('\n')
+
+/** Ordered vision routes: the named host model first, then any other vision-capable host model. */
+const HOST_VISION_CANDIDATES = exports.HOST_VISION_CANDIDATES = [
+  { provider: 'opencode-go', model: 'deepseek-v4.1-flash' },
+  { provider: 'deepseek-official', model: 'deepseek-flash' },
+  { provider: 'deepseek-account', model: 'deepseek-flash' },
+]
+
+/**
+ * Resolve the ordered routes to try: an explicit provider/model wins, then the
+ * preferred host models that actually exist and accept images, then nothing
+ * (which leaves the Ollama path in charge).
+ *
+ * `resolveModelInfo` is the host's own way to answer "can this model see
+ * images"; `listModels` is the fallback for an older adapter.
+ */
+async function resolveVisionRoutes(llm, override) {
+  if (override) {
+    if (override.includes('/')) {
+      const [provider, ...rest] = override.split('/')
+      return [{ provider, model: rest.join('/') }]
+    }
+    return HOST_VISION_CANDIDATES.filter((route) => route.model === override)
+  }
+  const routes = []
+  for (const candidate of HOST_VISION_CANDIDATES) {
+    if (await hostModelSeesImages(llm, candidate)) routes.push(candidate)
+  }
+  return routes
+}
+
+async function hostModelSeesImages(llm, { provider, model }) {
+  try {
+    const info = await llm.resolveModelInfo(provider, model)
+    const modalities = info?.inputModalities
+    if (Array.isArray(modalities)) return modalities.includes('image')
+  } catch {
+    // fall through to the list
+  }
+  try {
+    const models = await llm.listModels(provider)
+    const hit = models.find((entry) => entry.id === model)
+    return (hit?.inputModalities ?? []).includes('image')
+  } catch {
+    return false
+  }
+}
+
+/** One host vision turn; images are admitted by the attachment service first. */
+async function askHost(llm, attachments, route, imagePath, question, signal) {
+  const data = readFileSync(imagePath)
+  const mediaType = imageMediaType(imagePath)
+  const ref = await attachments.saveImage({ data, mediaType, name: basename(imagePath) })
+  const chunks = llm.stream({
+    provider: route.provider,
+    model: route.model,
+    messages: [{ role: 'user', content: [{ type: 'text', text: question }, { type: 'image', attachment: ref }] }],
+    signal,
+  })
+  let text = ''
+  for await (const chunk of chunks) {
+    if (chunk.type === 'text-delta') text += chunk.text
+    else if (chunk.type === 'block-end' && chunk.block?.type === 'text') text += chunk.block.text
+    else if (chunk.type === 'finish' && chunk.reason?.kind === 'error') {
+      throw new Error(`vision model ${route.provider}/${route.model} failed: ${chunk.reason.failure?.message ?? 'unknown error'}`)
+    }
+  }
+  return text
+}
+
+function imageMediaType(path) {
+  const extension = extname(path).toLowerCase()
+  if (extension === '.jpg' || extension === '.jpeg') return 'image/jpeg'
+  if (extension === '.webp') return 'image/webp'
+  if (extension === '.gif') return 'image/gif'
+  return 'image/png'
+}
+
+/** One non-streaming vision turn; a missing model is reported as an install hint. */
+async function ask(model, image, question, numCtx, signal) {
+  try {
+    const body = await postJson(OLLAMA_URL, '/api/chat', {
+      model,
+      messages: [{ role: 'user', content: question, images: [image] }],
+      stream: false,
+      options: { num_gpu: 99, num_ctx: numCtx },
+    }, { timeoutMs: REQUEST_TIMEOUT_MS, signal })
+    return body?.message?.content || body?.error || ''
+  } catch (error) {
+    if (error instanceof HttpError && error.status === 404) throw new Error(`Ollama model "${model}" is not installed — run: ollama pull ${model}`)
+    throw error
+  }
+}
+
+/**
+ * Refusal detection. Upstream uses a wider keyword list for the detail mode's
+ * Chinese questions (which enumerate body detail) than for a single free-form
+ * question, so a benign answer containing 健康积极 does not trigger the
+ * uncensored fallback there.
+ */
+function refused(answer, keywords = REFUSAL_KEYWORDS) {
+  return !answer || keywords.some((keyword) => answer.includes(keyword))
+}
+
+async function describe(imagePath, question, detail, model, signal, enableVision) {
+  const path = resolveUserPath(imagePath)
+  if (!existsSync(path)) throw new Error(`file not found: ${imagePath}`)
+  if (!enableVision) return VISION_DISABLED_MESSAGE
+  const route = await pickVisionRoute(model)
+  if (route) return describeWithHost(path, question, detail, route, signal)
+  if (model && !model.includes('/')) return describeWithOllama(path, question, detail, model, signal)
+  return describeWithOllama(path, question, detail, undefined, signal)
+}
+
+/**
+ * Pick the host vision route. An explicit `provider/model` wins; an explicit
+ * model id is matched against the known routes; otherwise the first known route
+ * that exists and accepts images wins. `undefined` means "use Ollama".
+ */
+async function pickVisionRoute(model) {
+  const llm = hostLlm()
+  if (!llm) return undefined
+  if (model && model.includes('/')) {
+    const [provider, ...rest] = model.split('/')
+    return { provider, model: rest.join('/') }
+  }
+  const routes = await resolveVisionRoutes(llm, model)
+  return routes[0]
+}
+
+function describeWithHost(path, question, detail, route, signal) {
+  const llm = hostLlm()
+  const attachments = hostAttachments()
+  if (!attachments?.saveImage) {
+    throw new Error('视觉服务需要宿主的 attachments 服务来提交图片，但它不可用；改用当前会话模型自带的 read_image 看图，或把 model 设为 ollama 的模型名以走本地 Ollama')
+  }
+  if (detail) {
+    return (async () => {
+      const parts = []
+      for (let i = 0; i < DETAIL_QUESTIONS.length; i++) {
+        const asked = `${DETAIL_QUESTIONS[i]} ${DETAIL_SUFFIX}`
+        const answer = (await askHost(llm, attachments, route, path, asked, signal)).trim()
+        parts.push(`${i + 1}. ${asked}\n   → ${answer}`)
+      }
+      return parts.join('\n\n')
+    })()
+  }
+  return askHost(llm, attachments, route, path, question || DEFAULT_QUESTION, signal).then((answer) => answer.trim())
+}
+
+async function describeWithOllama(path, question, detail, model, signal) {
+  const image = readFileSync(path).toString('base64')
+  const main = model || MAIN_MODEL
+  if (detail) {
+    let parts = []
+    let blocked = false
+    for (let i = 0; i < DETAIL_QUESTIONS.length; i++) {
+      const asked = `${DETAIL_QUESTIONS[i]} ${DETAIL_SUFFIX}`
+      const answer = (await ask(main, image, asked, 8192, signal)).trim()
+      if (refused(answer)) {
+        blocked = true
+        break
+      }
+      parts.push(`${i + 1}. ${asked}\n   → ${answer}`)
+    }
+    if (blocked) {
+      parts = []
+      for (let i = 0; i < DETAIL_FALLBACK_QUESTIONS.length; i++) {
+        const answer = (await ask(FALLBACK_MODEL, image, DETAIL_FALLBACK_QUESTIONS[i], 2048, signal)).trim()
+        parts.push(`${i + 1}. ${DETAIL_FALLBACK_QUESTIONS[i]}\n   → ${answer}`)
+      }
+    }
+    return parts.join('\n\n')
+  }
+  const asked = question || DEFAULT_QUESTION
+  const answer = (await ask(main, image, asked, 8192, signal)).trim()
+  if (refused(answer, REFUSAL_KEYWORDS_SINGLE)) return (await ask(FALLBACK_MODEL, image, FALLBACK_QUESTION, 2048, signal)).trim()
+  return answer
+}
+
+/** PIL's `convert('RGB')`: drop the alpha channel, keep the colour channels. */
+function toRgb(image) {
+  if (image.channels === 3) return image
+  const data = new Uint8Array(image.width * image.height * 3)
+  for (let i = 0, o = 0; i < image.data.length; i += 4) {
+    data[o++] = image.data[i]
+    data[o++] = image.data[i + 1]
+    data[o++] = image.data[i + 2]
+  }
+  return { width: image.width, height: image.height, channels: 3, data }
+}
+
+async function deconfuse(args) {
+  const src = resolveUserPath(args.image_path)
+  if (!existsSync(src)) throw new Error(`file not found: ${args.image_path}`)
+  const mode = args.mode ?? 'dec'
+  const times = args.times ?? 1
+  // Each pass is CPU-bound in the host process, so an unbounded count would
+  // block the harness long past the tool's own timeout (which is only consulted
+  // after the body settles). 小番茄 images in the wild are single- or
+  // double-obfuscated; anything beyond MAX_TIMES is a mistake, not a workload.
+  if (!Number.isInteger(times) || times < 1) throw new Error(`times must be a positive integer: ${args.times}`)
+  if (times > MAX_TIMES) throw new Error(`times is limited to ${MAX_TIMES} passes, got ${times}`)
+  const preserveMeta = args.preserve_meta === true
+  const raw = readFileSync(src)
+  const textChunks = preserveMeta ? parsePng(raw).textChunks : []
+  const input = decodePng(raw)
+  const result = transformTimes(toRgb(input), mode, times)
+  // out_path is a caller-supplied write target, so an explicit one must stay in
+  // a directory this plugin owns. The default keeps upstream's behaviour of
+  // writing beside the input; when the input's directory is not writable by
+  // policy, it falls back to the state directory.
+  const allowed = [outputDir(), STATE_DIR].map((dir) => resolve(dir) + sep)
+  const besideInput = join(dirname(src), `${basename(src, extname(src))}_${mode === 'enc' ? 'enc' : 'dec'}.png`)
+  let out
+  if (args.out_path) {
+    out = resolveUserPath(args.out_path)
+    if (!allowed.some((prefix) => out.startsWith(prefix))) {
+      throw new Error(`out_path must stay inside ${outputDir()} or ${STATE_DIR}: ${args.out_path}`)
+    }
+  } else {
+    out = allowed.some((prefix) => besideInput.startsWith(prefix)) ? besideInput : join(STATE_DIR, basename(besideInput))
+  }
+  mkdirSync(dirname(out), { recursive: true })
+  const log = [`输入: ${src} (${input.width}x${input.height})`]
+  for (let i = 0; i < times; i++) log.push(`  第${i + 1}次${mode === 'dec' ? '解混淆' : '混淆'}完成`)
+  if (preserveMeta && textChunks.length === 0) log.push('警告: 输入无文本元数据，直接保存')
+  writeFileSync(out, encodePng(result, { textChunks }))
+  log.push(textChunks.length > 0 ? `输出: ${out}（元数据已保留）` : `输出: ${out}`)
+  return { input: src, output: out, times, mode, log: log.join('\n') }
+}
+
+const tools = exports.tools = [
+  defineTool({
+    name: 'comfyui_describe_image',
+    description: `Describe a local image file. **Off by default**: you are usually a multimodal model already, so read the image yourself with the host's read_image tool instead of paying for a second vision route — that is faster, sees the original pixels, and costs no extra call. Call this tool only when you explicitly want a second opinion from a vision service, and then pass enable_vision=true (or set DSH_COMFYUI_VISION=1 in the DSH environment to make it the default for a deployment).
+When enabled, the host vision model is preferred: deepseek-v4.1-flash on opencode-go, then deepseek-flash on deepseek-official/deepseek-account — whichever exists and accepts images. An explicit model id picks a route: "provider/model" or a known host model id uses the host service, a bare Ollama model name (e.g. qwen3-vl:8b) keeps the local Ollama path, and "ollama" forces it. The Ollama path is the port of the upstream tool: qwen3-vl:8b is accurate and answers Chinese but refuses NSFW, so it retries once with llava:7b (English, no filter).
+Pass \`question\` for one specific question, or detail=true for the 11-question Chinese report (hair, eyes, body, clothing, props, pose, scene, background layering, composition, art style, on-image text/watermark).`,
+    timeoutMs: 2 * 60 * 60 * 1000,
+    parameters: {
+      image_path: { type: 'string', required: true, description: 'Path to a local image file (PNG/JPEG/WebP).' },
+      enable_vision: { type: 'boolean', default: false, description: 'Turn the vision service on for this call. Defaults to off (and to DSH_COMFYUI_VISION when set): with a multimodal session model, read the image yourself instead.' },
+      question: { type: 'string', description: 'One question to ask about the image. Defaults to a thorough Chinese description request.' },
+      detail: { type: 'boolean', default: false, description: 'Run the 11-question Chinese detail report instead of a single question. Slow: 11 sequential model calls.' },
+      model: { type: 'string', description: 'Vision route override: "provider/model" or a known host model id uses the host service; a bare name such as qwen3-vl:8b keeps the local Ollama path.' },
+    },
+    output: {
+      schema: { type: 'string' },
+      render: (_args, value) => [{ type: 'text', text: value }],
+    },
+    async execute(args, exec) {
+      return describe(args.image_path, args.question, args.detail === true, args.model, exec?.signal, visionEnabled(args))
+    },
+  }),
+  defineTool({
+    name: 'comfyui_deconfuse_image',
+    description: 'Undo 小番茄 (xiaofanqie) obfuscation, a reversible Gilbert-curve pixel permutation. Detection clue: neighbouring pixels stay strongly correlated but the picture looks like scattered fragments. mode=dec (default) restores an obfuscated image, mode=enc applies the obfuscation, and times repeats the pass (an image obfuscated N times needs N passes to come back, at most 64). Reads PNG (8/16-bit, gray/RGB/palette/RGBA, not interlaced) and writes 8-bit RGB PNG; JPEG input is refused because there is no JPEG decoder in this plugin — convert to PNG first. out_path defaults to <stem>_dec.png next to the input, and must stay inside the ComfyUI output directory or the plugin state directory. preserve_meta copies the input PNG tEXt/iTXt/zTXt text chunks onto the output, so a prompt stored before obfuscation survives the round trip. Obfuscated images that were JPEG-compressed or rescaled may not restore exactly, because the curve positions shift.',
+    timeoutMs: 10 * 60 * 1000,
+    parameters: {
+      image_path: { type: 'string', required: true, description: 'Path to the obfuscated (or original) PNG image.' },
+      times: { type: 'integer', default: 1, description: `How many passes to apply (1..${MAX_TIMES}). Use the same count that was used to obfuscate.` },
+      out_path: { type: 'string', description: `Output file path; must stay inside ${outputDir()} or ${STATE_DIR}. Defaults to <stem>_dec.png (or _enc.png) next to the input.` },
+      mode: { type: 'string', enum: ['dec', 'enc'], default: 'dec', description: 'dec = de-obfuscate (default), enc = obfuscate.' },
+      preserve_meta: { type: 'boolean', default: false, description: 'Carry the input PNG tEXt/iTXt/zTXt text chunks onto the output (PNG input only).' },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          input: { type: 'string', required: true },
+          output: { type: 'string', required: true },
+          times: { type: 'integer', required: true },
+          mode: { type: 'string', required: true },
+          log: { type: 'string', required: true },
+        },
+      },
+      render: (_args, value) => [{ type: 'text', text: `${value.mode} x${value.times}: ${value.input} -> ${value.output}\n${value.log}` }],
+    },
+    execute: deconfuse,
+  }),
+]
+
+}
+__moduleInit[7] = function module7(exports, url) {
 /**
  * The ComfyUI engine: pipeline loading and rewriting, submission and polling,
  * the web-API surface (system stats, models, object_info, queue, history) and
@@ -1166,9 +1965,11 @@ function compareHtml(referenceName, generatedName) {
 /**
  * Copy the first output into the compare directory and attach a `view_url`
  * served by VIEW_BASE; with a reference image a side-by-side page is written
- * instead of a bare image link. Never throws — viewing is a convenience.
+ * instead of a bare image link. The 8899 server is a required dependency, so a
+ * reachable check adds `view_warning` when the link would be dead. Never throws
+ * — viewing must not fail a successful generation.
  */
-const makeView = exports.makeView = function makeView(result, referenceImage) {
+const makeView = exports.makeView = async function makeView(result, referenceImage) {
   try {
     const [first] = result?.outputs ?? []
     if (!first) return result
@@ -1187,14 +1988,28 @@ const makeView = exports.makeView = function makeView(result, referenceImage) {
     } else {
       result.view_url = `${VIEW_BASE}/${basename(generated)}`
     }
+    // 8899 is a required dependency; a dead link is worse than no link.
+    if (!(await viewServerUp())) {
+      result.view_warning = `8899 静态服务未运行，view_url 打不开。启动：node tools/serve-compare.mjs（或 npm run serve-compare；默认 ${VIEW_BASE}）`
+    }
   } catch {
     // a failed copy must never fail a successful generation
   }
   return result
 }
 
+/** Whether the compare-page server answers a HEAD request. */
+const viewServerUp = exports.viewServerUp = async function viewServerUp(timeoutMs = 1500) {
+  try {
+    const response = await fetch(`${VIEW_BASE}/`, { method: 'HEAD', signal: AbortSignal.timeout(timeoutMs) })
+    return response.status < 500
+  } catch {
+    return false
+  }
 }
-__moduleInit[4] = function module4(exports, url) {
+
+}
+__moduleInit[8] = function module8(exports, url) {
 /**
  * The ComfyUI control tools: server status, model listing, Anima/Krea2
  * generation, arbitrary workflows, history, queue control, node schemas and
@@ -1207,9 +2022,11 @@ __moduleInit[4] = function module4(exports, url) {
 /* import from node:path is hoisted to the file head */
 /* import from node:zlib is hoisted to the file head */
 const { defineTool } = __modules[0].exports;
-const { CACHE_DIR, CAMOFOX_URL, CIVITAI_SEARCH_KEY, CIVITAI_TOKEN, COMFYUI_URL, DEFAULT_PIPELINE, OLLAMA_URL, listFiles, outputDir, readJsonFile, resolveUserPath } = __modules[1].exports;
+const { CACHE_DIR, CAMOFOX_URL, CIVITAI_SEARCH_KEY, CIVITAI_TOKEN, COMFYUI_URL, DEFAULT_PIPELINE, OLLAMA_URL, VIEW_BASE, listFiles, outputDir, readJsonFile, resolveUserPath } = __modules[1].exports;
 const { HttpError, getJson, tryJson } = __modules[2].exports;
-const { KREA2_UNET, clearQueue, executionError, findNodes, historyToRuns, historyView, interrupt, loadPipeline, makeView, modelNames, nodeInfo, queueView, recentRunSources, requireResource, runGraph, runKrea2, runPipeline, systemStats, viewUrl } = __modules[3].exports;
+const { hostLlm } = __modules[3].exports;
+const { HOST_VISION_CANDIDATES } = __modules[6].exports;
+const { KREA2_UNET, clearQueue, executionError, findNodes, historyToRuns, historyView, interrupt, loadPipeline, makeView, modelNames, nodeInfo, queueView, recentRunSources, requireResource, runGraph, runKrea2, runPipeline, systemStats, viewServerUp, viewUrl } = __modules[7].exports;
 
 const DEFAULT_UNET = 'anima-base-v1.0.safetensors'
 const DEFAULT_NEGATIVE = '(score_4, score_5, score_6:1.2), worst quality, low quality, normal quality, bad hands, bad feet, bad anatomy, '
@@ -1779,9 +2596,27 @@ const tools = exports.tools = [
         info.camofox = error instanceof HttpError ? `offline (http ${error.status})` : `offline (${error?.name ?? 'Error'})`
       }
       if (info.camofox !== 'online') info.missing.push('camofox-browser 未运行（必需：comfyui_lookup_character_tags / comfyui_lookup_character_appearance 不可用；启动 camofox-browser，默认 127.0.0.1:9377）')
+      // 8899 is required: comfyui_generate answers with a view_url on this base.
+      try {
+        info.view_server = (await viewServerUp()) ? 'online' : 'offline (no answer)'
+      } catch (error) {
+        info.view_server = `offline (${error?.name ?? 'Error'})`
+      }
+      info.view_base = VIEW_BASE
+      if (info.view_server !== 'online') {
+        info.missing.push(`8899 静态服务未运行（必需：comfyui_generate 返回的 view_url 打不开；启动：node tools/serve-compare.mjs，或 npm run serve-compare，默认 ${VIEW_BASE}）`)
+      }
       info.civitai = { token: !!CIVITAI_TOKEN, search_key: !!CIVITAI_SEARCH_KEY }
       if (!CIVITAI_TOKEN) info.missing.push('CIVITAI_TOKEN 未配置（comfyui_download_lora 不可用；可选）')
       if (!CIVITAI_SEARCH_KEY) info.missing.push('CIVITAI_SEARCH_KEY 未配置（comfyui_search_lora 不可用；可选）')
+      info.vision = {
+        enabled: /^(1|true|yes|on)$/i.test(process.env.DSH_COMFYUI_VISION ?? ''),
+        note: 'comfyui_describe_image 默认关闭：当前会话模型通常已支持图片，直接读图即可。',
+        host_routes: (() => {
+          const llm = hostLlm()
+          return llm ? HOST_VISION_CANDIDATES.map((route) => `${route.provider}/${route.model}`) : []
+        })(),
+      }
       info.ready = info.comfyui === 'online' && modelsOk
       if (info.missing.length > 0) info.guidance = '按 missing[] 逐项补齐依赖；每一步的操作与验证见 comfyui_setup_guide，模型文件名用 comfyui_list_models 确认。'
       try {
@@ -1958,7 +2793,7 @@ const tools = exports.tools = [
         elapsed_s: Math.max(1, Math.round((Date.now() - started) / 1000)),
       }
       if (characterInfo) result.character_info = characterInfo
-      return makeView(result, args.reference_image)
+      return await makeView(result, args.reference_image)
     },
   }),
 
@@ -2136,7 +2971,7 @@ const tools = exports.tools = [
 ]
 
 }
-__moduleInit[5] = function module5(exports, url) {
+__moduleInit[9] = function module9(exports, url) {
 /**
  * Danbooru character lookup driven through a local camofox-browser.
  *
@@ -2558,18 +3393,18 @@ const SETUP_STEPS = exports.SETUP_STEPS = [
   { step: 4, title: '确认管线模型就绪（无自定义节点依赖）',
     action: 'pipeline.json 只用 ComfyUI 内置节点（UNETLoader/CLIPLoader/VAELoader/LoraLoader/KSampler/RealESRGAN）',
     required: true, verify: 'comfyui_generate 能提交成功' },
-  { step: 5, title: 'Ollama 识图模型（按需，可后装）',
-    action: '首次需要识图（comfyui_describe_image）时再装：ollama pull qwen3-vl:8b && ollama pull llava:7b',
-    required: false, verify: 'comfyui_describe_image 能返回描述；未装时该工具会提示安装' },
+  { step: 5, title: '8899 对比页服务器（必需）',
+    action: '在插件目录启动对比页服务器：node tools/serve-compare.mjs（或 npm run serve-compare），默认 http://127.0.0.1:8899；它只读服务 <DSH_HOME>/storages/dsh-comfyui-control/compare/',
+    required: true, verify: 'comfyui_status 返回 view_server=online；comfyui_generate 返回的 view_url 能在浏览器打开' },
   { step: 6, title: '启动 camofox-browser',
     action: 'npm install -g camofox-browser && camofox-browser（默认 127.0.0.1:9377）',
     required: true, verify: 'comfyui_status 返回 camofox=online；缺了角色 tag/外貌查询不可用' },
   { step: 7, title: '配置 Civitai（可选）',
     action: '设置 CIVITAI_TOKEN（下载）和 CIVITAI_SEARCH_KEY（搜索），获取方法见 README 5b',
     required: false, verify: 'comfyui_search_lora / comfyui_download_lora 可用；不配不影响生成/识图' },
-  { step: 8, title: '启动对比页服务器（可选）',
-    action: '在插件目录起静态服务器指向 compare 目录（如 npx serve compare -l 8899）',
-    required: false, verify: 'comfyui_generate 返回的 view_url 可访问' },
+  { step: 8, title: '视觉服务（默认关闭，可选）',
+    action: 'comfyui_describe_image 默认不发请求：当前会话模型通常已支持图片，直接读图即可。需要第二个视觉服务时传 enable_vision=true（或在 DSH 进程设 DSH_COMFYUI_VISION=1），届时优先用宿主视觉模型（opencode-go 的 deepseek-v4.1-flash）；想走本地 Ollama 则显式传 model=qwen3-vl:8b 并先 ollama pull qwen3-vl:8b',
+    required: false, verify: 'comfyui_describe_image 默认返回「视觉服务默认关闭」说明；传 enable_vision=true 后能返回描述' },
   { step: 9, title: '跑一遍真实出图验证',
     action: '用 comfyui_generate 出一张小图（如 512x512、steps 8）：提示词用默认 5 件套 LoRA，出图后用 comfyui_extract_image_info 回读 PNG 元数据；也可在源码目录跑 node tools/verify-live.mjs 一次性验证所有实时工具',
     required: true, verify: 'comfyui_generate 返回 status=completed 与 view_url；元数据里能看到 KSampler 参数与 5 个 LoraLoader' },
@@ -2578,14 +3413,14 @@ const SETUP_STEPS = exports.SETUP_STEPS = [
 exports.APPEARANCE_SKIP = APPEARANCE_SKIP; exports.CHARACTER_CATEGORY = CHARACTER_CATEGORY; exports.WIKI_TEXT_LIMIT = WIKI_TEXT_LIMIT
 
 }
-__moduleInit[6] = function module6(exports, url) {
+__moduleInit[10] = function module10(exports, url) {
 /**
  * Character tools: Danbooru tag lookup, statistical appearance lookup, cache
  * listing and the initialization checklist. All four are mounted in the
  * 绘图模式 preset and drive a local camofox-browser.
  */
 const { defineTool } = __modules[0].exports;
-const { SETUP_STEPS, listCachedCharacters, lookupCharacter, lookupCharacterAppearance } = __modules[5].exports;
+const { SETUP_STEPS, listCachedCharacters, lookupCharacter, lookupCharacterAppearance } = __modules[9].exports;
 
 /** `{a: 1, b: 'x'}` -> `a=1 b="x"`, undefined entries dropped. */
 function inlineFields(entries) {
@@ -2691,7 +3526,7 @@ const tools = exports.tools = [
 ]
 
 }
-__moduleInit[7] = function module7(exports, url) {
+__moduleInit[11] = function module11(exports, url) {
 /**
  * Civitai LoRA search engine — a faithful port of good-comfyui-mcp's
  * `lora_search.py`.
@@ -3116,7 +3951,7 @@ const safetensorsHeader = exports.safetensorsHeader = function safetensorsHeader
 }
 
 }
-__moduleInit[8] = function module8(exports, url) {
+__moduleInit[12] = function module12(exports, url) {
 /**
  * Civitai LoRA tools: exact-version search, download + safetensors validation,
  * and by-hash reverse lookup.
@@ -3127,7 +3962,7 @@ __moduleInit[8] = function module8(exports, url) {
 /* import from node:fs is hoisted to the file head */
 /* import from node:path is hoisted to the file head */
 const { COMFYUI_ROOT } = __modules[1].exports;
-const { downloadVersion, findExactData, lookupByHash, safetensorsHeader } = __modules[7].exports;
+const { downloadVersion, findExactData, lookupByHash, safetensorsHeader } = __modules[11].exports;
 const { defineTool } = __modules[0].exports;
 
 /** `models/loras`, optionally nested one level deeper by `subdir`. */
@@ -3244,643 +4079,30 @@ const tools = exports.tools = [
 ]
 
 }
-__moduleInit[9] = function module9(exports, url) {
-/**
- * Dependency-free PNG codec over node:zlib.
- *
- * `decodePng` expands every supported PNG to 8-bit RGB or RGBA: gray samples
- * are replicated, palette entries come from PLTE (+ tRNS alpha), 16-bit samples
- * keep their most significant byte, and 1/2/4-bit gray is scaled by 255/max.
- * The output has 4 channels exactly when the source carries alpha (colour type
- * 4/6, or a tRNS chunk); everything else is RGB. Adam7 interlacing is rejected
- * because a space-filling-curve permutation needs the whole pixel grid.
- *
- * `encodePng` writes one filter-0 IDAT and can re-attach the input's original
- * tEXt/iTXt/zTXt chunks verbatim, which is what `preserve_meta` needs. Only
- * 8-bit RGB/RGBA is written, matching the upstream PIL `convert('RGB')` path.
- */
-/* import from node:zlib is hoisted to the file head */
-
-const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
-const TEXT_TYPES = new Set(['tEXt', 'iTXt', 'zTXt'])
-const METADATA_KEYS = new Set(['parameters', 'prompt', 'workflow', 'Comment', 'Description'])
-/** Samples per pixel, and the bit depths this codec understands, per colour type. */
-const SAMPLES = { 0: 1, 2: 3, 3: 1, 4: 2, 6: 4 }
-const DEPTHS = { 0: [1, 2, 4, 8, 16], 2: [8, 16], 3: [1, 2, 4, 8], 4: [8, 16], 6: [8, 16] }
-
-const CRC_TABLE = (() => {
-  const table = new Uint32Array(256)
-  for (let n = 0; n < 256; n++) {
-    let c = n
-    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1
-    table[n] = c >>> 0
-  }
-  return table
-})()
-
-function crc32(bytes) {
-  let c = 0xffffffff
-  for (let i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xff] ^ (c >>> 8)
-  return (c ^ 0xffffffff) >>> 0
-}
-
-function chunk(type, payload) {
-  const data = Buffer.from(payload)
-  const out = Buffer.alloc(data.length + 12)
-  out.writeUInt32BE(data.length, 0)
-  out.write(type, 4, 'latin1')
-  data.copy(out, 8)
-  out.writeUInt32BE(crc32(out.subarray(4, 8 + data.length)), 8 + data.length)
-  return out
-}
-
-function paeth(left, up, upLeft) {
-  const p = left + up - upLeft
-  const pa = Math.abs(p - left)
-  const pb = Math.abs(p - up)
-  const pc = Math.abs(p - upLeft)
-  if (pa <= pb && pa <= pc) return left
-  return pb <= pc ? up : upLeft
-}
-
-/** Undo the per-row PNG filters in place; `bpp` is at least one byte. */
-function unfilter(raw, height, bytesPerRow, bpp) {
-  const stride = bytesPerRow + 1
-  for (let y = 0; y < height; y++) {
-    const base = y * stride
-    const filter = raw[base]
-    if (filter === 0) continue
-    const row = raw.subarray(base + 1, base + 1 + bytesPerRow)
-    const prev = y === 0 ? undefined : raw.subarray(base - stride + 1, base - stride + 1 + bytesPerRow)
-    if (filter === 1) {
-      for (let i = bpp; i < bytesPerRow; i++) row[i] = (row[i] + row[i - bpp]) & 0xff
-    } else if (filter === 2) {
-      if (!prev) continue
-      for (let i = 0; i < bytesPerRow; i++) row[i] = (row[i] + prev[i]) & 0xff
-    } else if (filter === 3) {
-      for (let i = 0; i < bytesPerRow; i++) {
-        const left = i >= bpp ? row[i - bpp] : 0
-        const up = prev ? prev[i] : 0
-        row[i] = (row[i] + ((left + up) >> 1)) & 0xff
-      }
-    } else if (filter === 4) {
-      for (let i = 0; i < bytesPerRow; i++) {
-        const left = i >= bpp ? row[i - bpp] : 0
-        const up = prev ? prev[i] : 0
-        const upLeft = prev && i >= bpp ? prev[i - bpp] : 0
-        row[i] = (row[i] + paeth(left, up, upLeft)) & 0xff
-      }
-    } else {
-      throw new Error(`unknown PNG filter type ${filter} on row ${y}`)
-    }
-  }
-}
-
-/** One filtered scanline to raw sample values (MSB first for sub-byte depths). */
-function expandRow(row, width, bitDepth, samplesPerPixel) {
-  const samples = new Uint16Array(width * samplesPerPixel)
-  if (bitDepth === 8) {
-    for (let i = 0; i < samples.length; i++) samples[i] = row[i]
-    return samples
-  }
-  if (bitDepth === 16) {
-    for (let i = 0; i < samples.length; i++) samples[i] = (row[i * 2] << 8) | row[i * 2 + 1]
-    return samples
-  }
-  const perByte = 8 / bitDepth
-  const mask = (1 << bitDepth) - 1
-  for (let i = 0; i < samples.length; i++) {
-    const shift = 8 - bitDepth - (i % perByte) * bitDepth
-    samples[i] = (row[Math.floor(i / perByte)] >> shift) & mask
-  }
-  return samples
-}
-
-function gray8(value, bitDepth) {
-  if (bitDepth === 16) return value >> 8
-  if (bitDepth === 8) return value
-  return (value * 255) / ((1 << bitDepth) - 1)
-}
-
-/** Walk the chunk stream; rejects a foreign or truncated file. Chunk CRCs are ignored on read. */
-const parsePng = exports.parsePng = function parsePng(buffer) {
-  const data = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer)
-  if (data.length < 8 || !data.subarray(0, 8).equals(PNG_SIGNATURE)) throw new Error('not a PNG file (bad signature)')
-  const chunks = []
-  let pos = 8
-  while (pos + 12 <= data.length) {
-    const length = data.readUInt32BE(pos)
-    const type = data.toString('latin1', pos + 4, pos + 8)
-    if (pos + 12 + length > data.length) throw new Error(`truncated PNG ${type} chunk at byte ${pos}`)
-    chunks.push({ type, data: data.subarray(pos + 8, pos + 8 + length) })
-    pos += 12 + length
-    if (type === 'IEND') break
-  }
-  const ihdr = chunks.find((entry) => entry.type === 'IHDR')
-  if (!ihdr || ihdr.data.length < 13) throw new Error('PNG is missing its IHDR chunk')
-  const width = ihdr.data.readUInt32BE(0)
-  const height = ihdr.data.readUInt32BE(4)
-  const bitDepth = ihdr.data[8]
-  const colorType = ihdr.data[9]
-  const interlace = ihdr.data[12]
-  if (interlace !== 0) throw new Error('interlaced (Adam7) PNG is not supported')
-  return { width, height, bitDepth, colorType, interlace, chunks, textChunks: chunks.filter((entry) => TEXT_TYPES.has(entry.type)) }
-}
-
-const decodePng = exports.decodePng = function decodePng(buffer) {
-  const png = parsePng(buffer)
-  const { width, height, bitDepth, colorType } = png
-  const samplesPerPixel = SAMPLES[colorType]
-  if (!samplesPerPixel) throw new Error(`unsupported PNG colour type ${colorType}`)
-  if (!DEPTHS[colorType].includes(bitDepth)) throw new Error(`unsupported PNG bit depth ${bitDepth} for colour type ${colorType}`)
-  if (width === 0 || height === 0) throw new Error(`PNG has an empty image (${width}x${height})`)
-
-  const idat = png.chunks.filter((entry) => entry.type === 'IDAT').map((entry) => entry.data)
-  if (idat.length === 0) throw new Error('PNG is missing its IDAT chunk')
-  const raw = inflateSync(Buffer.concat(idat))
-  const bytesPerRow = Math.ceil((width * samplesPerPixel * bitDepth) / 8)
-  const stride = bytesPerRow + 1
-  if (raw.length < stride * height) throw new Error(`PNG IDAT is truncated (${raw.length} of ${stride * height} bytes)`)
-  unfilter(raw, height, bytesPerRow, Math.max(1, Math.ceil((samplesPerPixel * bitDepth) / 8)))
-
-  const palette = png.chunks.find((entry) => entry.type === 'PLTE')?.data
-  const trns = png.chunks.find((entry) => entry.type === 'tRNS')?.data
-  if (colorType === 3 && !palette) throw new Error('palette PNG is missing its PLTE chunk')
-  const alpha = colorType === 4 || colorType === 6 || trns !== undefined
-  const channels = alpha ? 4 : 3
-  const out = new Uint8Array(width * height * channels)
-  // tRNS colour-key sample for gray (0) and RGB (2), two bytes per sample whatever
-  // the bit depth; palette tRNS is a per-index alpha table instead.
-  const grayKey = colorType === 0 && trns ? (trns[0] << 8) | trns[1] : -1
-  const rgbKey = colorType === 2 && trns ? [(trns[0] << 8) | trns[1], (trns[2] << 8) | trns[3], (trns[4] << 8) | trns[5]] : undefined
-
-  let o = 0
-  for (let y = 0; y < height; y++) {
-    const row = raw.subarray(y * stride + 1, y * stride + 1 + bytesPerRow)
-    const s = expandRow(row, width, bitDepth, samplesPerPixel)
-    if (colorType === 0) {
-      for (let x = 0; x < width; x++) {
-        const value = s[x]
-        const v = gray8(value, bitDepth)
-        out[o++] = v
-        out[o++] = v
-        out[o++] = v
-        if (channels === 4) out[o++] = value === grayKey ? 0 : 255
-      }
-    } else if (colorType === 2) {
-      for (let x = 0; x < width; x++) {
-        const i = x * 3
-        const r = bitDepth === 16 ? s[i] >> 8 : s[i]
-        const g = bitDepth === 16 ? s[i + 1] >> 8 : s[i + 1]
-        const b = bitDepth === 16 ? s[i + 2] >> 8 : s[i + 2]
-        out[o++] = r
-        out[o++] = g
-        out[o++] = b
-        if (channels === 4) out[o++] = rgbKey && s[i] === rgbKey[0] && s[i + 1] === rgbKey[1] && s[i + 2] === rgbKey[2] ? 0 : 255
-      }
-    } else if (colorType === 3) {
-      for (let x = 0; x < width; x++) {
-        const index = s[x]
-        const p = index * 3
-        if (p + 3 > palette.length) throw new Error(`palette index ${index} is out of range`)
-        out[o++] = palette[p]
-        out[o++] = palette[p + 1]
-        out[o++] = palette[p + 2]
-        if (channels === 4) out[o++] = index < (trns?.length ?? 0) ? trns[index] : 255
-      }
-    } else if (colorType === 4) {
-      for (let x = 0; x < width; x++) {
-        const v = gray8(s[x * 2], bitDepth)
-        out[o++] = v
-        out[o++] = v
-        out[o++] = v
-        out[o++] = bitDepth === 16 ? s[x * 2 + 1] >> 8 : s[x * 2 + 1]
-      }
-    } else {
-      for (let x = 0; x < width; x++) {
-        const i = x * 4
-        if (bitDepth === 16) {
-          out[o++] = s[i] >> 8
-          out[o++] = s[i + 1] >> 8
-          out[o++] = s[i + 2] >> 8
-          out[o++] = s[i + 3] >> 8
-        } else {
-          out[o++] = s[i]
-          out[o++] = s[i + 1]
-          out[o++] = s[i + 2]
-          out[o++] = s[i + 3]
-        }
-      }
-    }
-  }
-  return { width, height, channels, data: out }
-}
-
-const encodePng = exports.encodePng = function encodePng({ width, height, channels, data }, { textChunks = [] } = {}) {
-  if (channels !== 3 && channels !== 4) throw new Error(`encodePng writes 3 (RGB) or 4 (RGBA) channels, got ${channels}`)
-  const stride = width * channels
-  if (data.length < stride * height) throw new Error(`pixel buffer is short (${data.length} of ${stride * height} bytes)`)
-  const raw = Buffer.alloc((stride + 1) * height)
-  for (let y = 0; y < height; y++) Buffer.from(data.buffer, data.byteOffset + y * stride, stride).copy(raw, y * (stride + 1) + 1)
-  const ihdr = Buffer.alloc(13)
-  ihdr.writeUInt32BE(width, 0)
-  ihdr.writeUInt32BE(height, 4)
-  ihdr[8] = 8
-  ihdr[9] = channels === 4 ? 6 : 2
-  const parts = [PNG_SIGNATURE, chunk('IHDR', ihdr)]
-  for (const entry of textChunks) parts.push(chunk(entry.type, entry.data))
-  parts.push(chunk('IDAT', deflateSync(raw)), chunk('IEND', Buffer.alloc(0)))
-  return Buffer.concat(parts)
-}
-
-/** Split a text chunk payload into its keyword and value, inflating zTXt/iTXt. */
-function textChunkValue({ type, data }) {
-  const nul = data.indexOf(0)
-  if (nul < 0) return { key: '', value: data.toString('utf8') }
-  const key = data.toString('latin1', 0, nul)
-  if (type === 'tEXt') return { key, value: data.toString('utf8', nul + 1) }
-  if (type === 'zTXt') {
-    if (data[nul + 1] !== 0) return undefined
-    try {
-      return { key, value: inflateSync(data.subarray(nul + 2)).toString('utf8') }
-    } catch {
-      return undefined
-    }
-  }
-  const compressed = data[nul + 1] === 1
-  let cursor = data.indexOf(0, nul + 3)
-  if (cursor < 0) return undefined
-  cursor = data.indexOf(0, cursor + 1)
-  if (cursor < 0) return { key, value: '' }
-  const text = data.subarray(cursor + 1)
-  try {
-    return { key, value: compressed ? inflateSync(text).toString('utf8') : text.toString('utf8') }
-  } catch {
-    return undefined
-  }
-}
-
-/**
- * The metadata dict `comfyui_extract_image_info` reports: ComfyUI writes
- * `prompt`/`workflow` tEXt pairs, WebUI/NovelAI a single `parameters` chunk.
- * `prompt`/`workflow` stay whole so the caller can parse them; the rest are
- * trimmed to 2000 characters, as upstream does.
- */
-const readTextMetadata = exports.readTextMetadata = function readTextMetadata(buffer) {
-  const metadata = {}
-  for (const entry of parsePng(buffer).textChunks) {
-    const decoded = textChunkValue(entry)
-    if (!decoded || !METADATA_KEYS.has(decoded.key)) continue
-    metadata[decoded.key] = decoded.key === 'prompt' || decoded.key === 'workflow' ? decoded.value : decoded.value.slice(0, 2000)
-  }
-  return metadata
-}
-
-}
-__moduleInit[10] = function module10(exports, url) {
-/**
- * 小番茄混淆 (Gilbert curve pixel permutation) — port of xfq_tool.py.
- *
- * `gilbertCurve(w, h)` enumerates every pixel of the w×h grid exactly once. The
- * golden-ratio offset `L = round((sqrt(5)-1)/2 * w*h)` shifts that enumeration,
- * and one pass either writes pixel `u[s]` to `u[(s+L) % d]` (`enc`) or reads it
- * from there (`dec`), so `dec` is the exact inverse of `enc`. Repeating the
- * permutation `times` times matches `xfq_tool.py --times N`.
- */
-
-const gilbertCurve = exports.gilbertCurve = function gilbertCurve(w, h) {
-  // A zero or negative extent has no pixels; without this the recursion never
-  // reaches its base case. Such an image is rejected before it gets here, but
-  // the helper is exported.
-  if (!Number.isInteger(w) || !Number.isInteger(h) || w <= 0 || h <= 0) return []
-  const points = []
-  const walk = (t, n, e, o, c, a) => {
-    const m = Math.abs(e + o)
-    const l = Math.abs(c + a)
-    const u = Math.sign(e)
-    const d = Math.sign(o)
-    const L = Math.sign(c)
-    const s = Math.sign(a)
-    if (l === 1) {
-      for (let i = 0; i < m; i++) {
-        points.push([t, n])
-        t += u
-        n += d
-      }
-      return
-    }
-    if (m === 1) {
-      for (let i = 0; i < l; i++) {
-        points.push([t, n])
-        t += L
-        n += s
-      }
-      return
-    }
-    let ph = Math.floor(e / 2)
-    let pg = Math.floor(o / 2)
-    let pi = Math.floor(c / 2)
-    let pf = Math.floor(a / 2)
-    if (2 * m > 3 * l) {
-      if (Math.abs(ph + pg) % 2 === 1 && m > 2) {
-        ph += u
-        pg += d
-      }
-      walk(t, n, ph, pg, c, a)
-      walk(t + ph, n + pg, e - ph, o - pg, c, a)
-    } else {
-      if (Math.abs(pi + pf) % 2 === 1 && l > 2) {
-        pi += L
-        pf += s
-      }
-      walk(t, n, pi, pf, ph, pg)
-      walk(t + pi, n + pf, e, o, c - pi, a - pf)
-      walk(t + (e - u) + (pi - L), n + (o - d) + (pf - s), -pi, -pf, -(e - ph), -(o - pg))
-    }
-  }
-  if (w >= h) walk(0, 0, w, 0, 0, h)
-  else walk(0, 0, 0, h, w, 0)
-  return points
-}
-
-/** One enc/dec pass. `image` is `{width, height, channels, data}` (row major). */
-const xfqTransform = exports.xfqTransform = function xfqTransform({ width, height, channels, data }, mode) {
-  if (mode !== 'enc' && mode !== 'dec') throw new Error(`mode must be 'enc' or 'dec', got ${mode}`)
-  const pixels = width * height
-  // Python's round() is half-to-even, but (sqrt(5)-1)/2 * d never lands on an
-  // exact .5 for any pixel count, so Math.round gives the same L.
-  const offset = Math.round(((Math.sqrt(5) - 1) / 2) * pixels)
-  const curve = gilbertCurve(width, height)
-  if (curve.length !== pixels) throw new Error(`Gilbert curve covered ${curve.length} of ${pixels} pixels for ${width}x${height}`)
-  const order = new Uint32Array(pixels)
-  for (let s = 0; s < pixels; s++) order[s] = curve[s][0] + curve[s][1] * width
-  const out = new Uint8Array(data.length)
-  let shifted = offset % pixels
-  if (mode === 'enc') {
-    for (let s = 0; s < pixels; s++) {
-      const from = order[s] * channels
-      const to = order[shifted] * channels
-      for (let k = 0; k < channels; k++) out[to + k] = data[from + k]
-      if (++shifted === pixels) shifted = 0
-    }
-  } else {
-    for (let s = 0; s < pixels; s++) {
-      const to = order[s] * channels
-      const from = order[shifted] * channels
-      for (let k = 0; k < channels; k++) out[to + k] = data[from + k]
-      if (++shifted === pixels) shifted = 0
-    }
-  }
-  return { width, height, channels, data: out }
-}
-
-/** `xfq_tool.py --times N`: N passes in the same direction. */
-const transformTimes = exports.transformTimes = function transformTimes(image, mode, times) {
-  let current = image
-  for (let i = 0; i < times; i++) current = xfqTransform(current, mode)
-  return current
-}
-}
-__moduleInit[11] = function module11(exports, url) {
-/**
- * Local vision + 小番茄 de-obfuscation tools.
- *
- * `comfyui_describe_image` is a port of the upstream `describe_image`: one
- * question to Ollama's `/api/chat` on the GPU (default qwen3-vl:8b, which
- * answers Chinese but refuses NSFW) with an automatic llava:7b retry on
- * refusal, and an 11-question Chinese report for `detail`.
- *
- * `comfyui_deconfuse_image` is a port of the upstream `deconfuse_image` plus the
- * full `xfq_tool.py` surface it drives: the Gilbert-curve permutation in
- * lib/xfq.js, `--times`, `--mode` and `--preserve-meta`.
- */
-/* import from node:fs is hoisted to the file head */
-/* import from node:path is hoisted to the file head */
-const { OLLAMA_URL, STATE_DIR, outputDir, resolveUserPath } = __modules[1].exports;
-const { HttpError, postJson } = __modules[2].exports;
-const { decodePng, encodePng, parsePng } = __modules[9].exports;
-const { defineTool } = __modules[0].exports;
-const { transformTimes } = __modules[10].exports;
-
-const MAIN_MODEL = 'qwen3-vl:8b'
-const FALLBACK_MODEL = 'llava:7b'
-/** Upstream's detail path refuses on all six keywords; its single-question path omits 健康积极. */
-const REFUSAL_KEYWORDS = ['无法提供', '不能', '抱歉', '不当内容', '公序良俗', '健康积极']
-/** The single-question path uses upstream's five keywords; 健康积极 is detail-mode only. */
-const REFUSAL_KEYWORDS_SINGLE = ['无法提供', '不能', '抱歉', '不当内容', '公序良俗']
-const DEFAULT_QUESTION = '请详细描述这张图片，用中文：1) 角色外貌（发型、发色、瞳色、体型）2) 服装 3) 姿势/动作 4) 场景背景 5) 视角构图 6) 画风。'
-const FALLBACK_QUESTION = 'Describe this image in detail: character appearance, clothing, pose, background, art style.'
-const DETAIL_SUFFIX = '请详细列举，不要省略任何细节，分点回答。'
-const DETAIL_QUESTIONS = [
-  '头发：发色（含渐变层次）、发型、长度、发饰配件（蝴蝶结/发夹/猫耳等）？',
-  '眼睛：瞳色、眼型、表情细节（眼神、眉毛、嘴型）？',
-  '体型与皮肤：体型特征、肤色、特殊标记（纹身/伤痕/痣）？',
-  '服装：从上到下逐件描述（上衣/下装/袜子/鞋子）、材质、颜色、装饰、配饰（首饰/项圈/腰带）？',
-  '手持物与道具：角色拿着或身边有什么道具？',
-  '姿势：全身姿势细节（手/腿/头的位置和角度）、重心？',
-  '场景：环境（室内/室外、具体场所、家具/建筑）、光线来源与方向、色调？',
-  '背景分层：前景/中景/背景各有什么元素？虚化程度如何？',
-  '构图：视角（俯视/仰视/平视）、景别（特写/近景/中景/全景）、人物在画面中的位置、留白情况？',
-  '画风：具体风格（赛璐璐/厚涂/水彩/3D渲染）、线条特点、上色方式？',
-  '画面文字/水印/特效：有没有文字、水印、光效、粒子、飘落物？',
-]
-const DETAIL_FALLBACK_QUESTIONS = [
-  'Hair: exact hair color, hairstyle, length, any hair accessories?',
-  'Eyes: eye color, eye shape, expression?',
-  'Body: body type, skin details, what is she wearing exactly (top, bottom, shoes)?',
-  'Pose: exact body position, what is she doing with her hands, legs, head?',
-  'Objects: list every object visible in the image (furniture, props, food, toys)?',
-  'Scene: indoor or outdoor, what room, background details, lighting?',
-  'Art style: 2D anime, 3D, painterly, line art? Color palette?',
-  'Camera angle: is the camera at eye level, looking up from below (low angle), or looking down from above (high angle)?',
-  'Zoom level: is it a close-up, medium shot, waist-up, full body, or wide shot?',
-  'Framing: where is the character positioned in the frame (center, left, right)? Is there much empty space around her?',
-  'Perspective: is she seen from the front, side, three-quarter view, or from behind?',
-]
-/** The upstream gives each Ollama request 900 seconds. */
-const REQUEST_TIMEOUT_MS = 900_000
-/** Upper bound on de-obfuscation passes; each one is a full synchronous pixel walk. */
-const MAX_TIMES = 64
-
-/** One non-streaming vision turn; a missing model is reported as an install hint. */
-async function ask(model, image, question, numCtx, signal) {
-  try {
-    const body = await postJson(OLLAMA_URL, '/api/chat', {
-      model,
-      messages: [{ role: 'user', content: question, images: [image] }],
-      stream: false,
-      options: { num_gpu: 99, num_ctx: numCtx },
-    }, { timeoutMs: REQUEST_TIMEOUT_MS, signal })
-    return body?.message?.content || body?.error || ''
-  } catch (error) {
-    if (error instanceof HttpError && error.status === 404) throw new Error(`Ollama model "${model}" is not installed — run: ollama pull ${model}`)
-    throw error
-  }
-}
-
-/**
- * Refusal detection. Upstream uses a wider keyword list for the detail mode's
- * Chinese questions (which enumerate body detail) than for a single free-form
- * question, so a benign answer containing 健康积极 does not trigger the
- * uncensored fallback there.
- */
-function refused(answer, keywords = REFUSAL_KEYWORDS) {
-  return !answer || keywords.some((keyword) => answer.includes(keyword))
-}
-
-async function describe(imagePath, question, detail, model, signal) {
-  const path = resolveUserPath(imagePath)
-  if (!existsSync(path)) throw new Error(`file not found: ${imagePath}`)
-  const image = readFileSync(path).toString('base64')
-  const main = model || MAIN_MODEL
-  if (detail) {
-    let parts = []
-    let blocked = false
-    for (let i = 0; i < DETAIL_QUESTIONS.length; i++) {
-      const asked = `${DETAIL_QUESTIONS[i]} ${DETAIL_SUFFIX}`
-      const answer = (await ask(main, image, asked, 8192, signal)).trim()
-      if (refused(answer)) {
-        blocked = true
-        break
-      }
-      parts.push(`${i + 1}. ${asked}\n   → ${answer}`)
-    }
-    if (blocked) {
-      parts = []
-      for (let i = 0; i < DETAIL_FALLBACK_QUESTIONS.length; i++) {
-        const answer = (await ask(FALLBACK_MODEL, image, DETAIL_FALLBACK_QUESTIONS[i], 2048, signal)).trim()
-        parts.push(`${i + 1}. ${DETAIL_FALLBACK_QUESTIONS[i]}\n   → ${answer}`)
-      }
-    }
-    return parts.join('\n\n')
-  }
-  const asked = question || DEFAULT_QUESTION
-  const answer = (await ask(main, image, asked, 8192, signal)).trim()
-  if (refused(answer, REFUSAL_KEYWORDS_SINGLE)) return (await ask(FALLBACK_MODEL, image, FALLBACK_QUESTION, 2048, signal)).trim()
-  return answer
-}
-
-/** PIL's `convert('RGB')`: drop the alpha channel, keep the colour channels. */
-function toRgb(image) {
-  if (image.channels === 3) return image
-  const data = new Uint8Array(image.width * image.height * 3)
-  for (let i = 0, o = 0; i < image.data.length; i += 4) {
-    data[o++] = image.data[i]
-    data[o++] = image.data[i + 1]
-    data[o++] = image.data[i + 2]
-  }
-  return { width: image.width, height: image.height, channels: 3, data }
-}
-
-async function deconfuse(args) {
-  const src = resolveUserPath(args.image_path)
-  if (!existsSync(src)) throw new Error(`file not found: ${args.image_path}`)
-  const mode = args.mode ?? 'dec'
-  const times = args.times ?? 1
-  // Each pass is CPU-bound in the host process, so an unbounded count would
-  // block the harness long past the tool's own timeout (which is only consulted
-  // after the body settles). 小番茄 images in the wild are single- or
-  // double-obfuscated; anything beyond MAX_TIMES is a mistake, not a workload.
-  if (!Number.isInteger(times) || times < 1) throw new Error(`times must be a positive integer: ${args.times}`)
-  if (times > MAX_TIMES) throw new Error(`times is limited to ${MAX_TIMES} passes, got ${times}`)
-  const preserveMeta = args.preserve_meta === true
-  const raw = readFileSync(src)
-  const textChunks = preserveMeta ? parsePng(raw).textChunks : []
-  const input = decodePng(raw)
-  const result = transformTimes(toRgb(input), mode, times)
-  // out_path is a caller-supplied write target, so an explicit one must stay in
-  // a directory this plugin owns. The default keeps upstream's behaviour of
-  // writing beside the input; when the input's directory is not writable by
-  // policy, it falls back to the state directory.
-  const allowed = [outputDir(), STATE_DIR].map((dir) => resolve(dir) + sep)
-  const besideInput = join(dirname(src), `${basename(src, extname(src))}_${mode === 'enc' ? 'enc' : 'dec'}.png`)
-  let out
-  if (args.out_path) {
-    out = resolveUserPath(args.out_path)
-    if (!allowed.some((prefix) => out.startsWith(prefix))) {
-      throw new Error(`out_path must stay inside ${outputDir()} or ${STATE_DIR}: ${args.out_path}`)
-    }
-  } else {
-    out = allowed.some((prefix) => besideInput.startsWith(prefix)) ? besideInput : join(STATE_DIR, basename(besideInput))
-  }
-  mkdirSync(dirname(out), { recursive: true })
-  const log = [`输入: ${src} (${input.width}x${input.height})`]
-  for (let i = 0; i < times; i++) log.push(`  第${i + 1}次${mode === 'dec' ? '解混淆' : '混淆'}完成`)
-  if (preserveMeta && textChunks.length === 0) log.push('警告: 输入无文本元数据，直接保存')
-  writeFileSync(out, encodePng(result, { textChunks }))
-  log.push(textChunks.length > 0 ? `输出: ${out}（元数据已保留）` : `输出: ${out}`)
-  return { input: src, output: out, times, mode, log: log.join('\n') }
-}
-
-const tools = exports.tools = [
-  defineTool({
-    name: 'comfyui_describe_image',
-    description: 'Describe a local image file with a local Ollama vision model on the GPU. The default model qwen3-vl:8b is accurate and answers Chinese but refuses NSFW; the tool then automatically retries with llava:7b (English, no filter). Pass `question` for one specific question, or detail=true for the 11-question Chinese report (hair, eyes, body, clothing, props, pose, scene, background layering, composition, art style, on-image text/watermark) assembled into a full description. `model` overrides the default. Use this to inspect a generated or referenced image instead of guessing its content.',
-    timeoutMs: 2 * 60 * 60 * 1000,
-    parameters: {
-      image_path: { type: 'string', required: true, description: 'Path to a local image file (PNG/JPEG/WebP).' },
-      question: { type: 'string', description: 'One question to ask about the image. Defaults to a thorough Chinese description request.' },
-      detail: { type: 'boolean', default: false, description: 'Run the 11-question Chinese detail report instead of a single question. Slow: 11 sequential model calls.' },
-      model: { type: 'string', description: `Ollama model to use. Defaults to ${MAIN_MODEL}.` },
-    },
-    output: {
-      schema: { type: 'string' },
-      render: (_args, value) => [{ type: 'text', text: value }],
-    },
-    async execute(args, exec) {
-      return describe(args.image_path, args.question, args.detail === true, args.model, exec?.signal)
-    },
-  }),
-  defineTool({
-    name: 'comfyui_deconfuse_image',
-    description: 'Undo 小番茄 (xiaofanqie) obfuscation, a reversible Gilbert-curve pixel permutation. Detection clue: neighbouring pixels stay strongly correlated but the picture looks like scattered fragments. mode=dec (default) restores an obfuscated image, mode=enc applies the obfuscation, and times repeats the pass (an image obfuscated N times needs N passes to come back, at most 64). Reads PNG (8/16-bit, gray/RGB/palette/RGBA, not interlaced) and writes 8-bit RGB PNG; JPEG input is refused because there is no JPEG decoder in this plugin — convert to PNG first. out_path defaults to <stem>_dec.png next to the input, and must stay inside the ComfyUI output directory or the plugin state directory. preserve_meta copies the input PNG tEXt/iTXt/zTXt text chunks onto the output, so a prompt stored before obfuscation survives the round trip. Obfuscated images that were JPEG-compressed or rescaled may not restore exactly, because the curve positions shift.',
-    timeoutMs: 10 * 60 * 1000,
-    parameters: {
-      image_path: { type: 'string', required: true, description: 'Path to the obfuscated (or original) PNG image.' },
-      times: { type: 'integer', default: 1, description: `How many passes to apply (1..${MAX_TIMES}). Use the same count that was used to obfuscate.` },
-      out_path: { type: 'string', description: `Output file path; must stay inside ${outputDir()} or ${STATE_DIR}. Defaults to <stem>_dec.png (or _enc.png) next to the input.` },
-      mode: { type: 'string', enum: ['dec', 'enc'], default: 'dec', description: 'dec = de-obfuscate (default), enc = obfuscate.' },
-      preserve_meta: { type: 'boolean', default: false, description: 'Carry the input PNG tEXt/iTXt/zTXt text chunks onto the output (PNG input only).' },
-    },
-    output: {
-      schema: {
-        type: 'object',
-        additionalProperties: false,
-        properties: {
-          input: { type: 'string', required: true },
-          output: { type: 'string', required: true },
-          times: { type: 'integer', required: true },
-          mode: { type: 'string', required: true },
-          log: { type: 'string', required: true },
-        },
-      },
-      render: (_args, value) => [{ type: 'text', text: `${value.mode} x${value.times}: ${value.input} -> ${value.output}\n${value.log}` }],
-    },
-    execute: deconfuse,
-  }),
-]
-
-}
-__moduleInit[12] = function module12(exports, url) {
+__moduleInit[13] = function module13(exports, url) {
 /**
  * Plugin activation: register every tool this package contributes.
  *
- * The plugin is mounted by the 绘图模式 agent preset only. It registers on
- * `ctx.tools` and provides no service, so it neither leaks into the root realm
- * nor becomes visible to a session whose preset does not name it.
+ * The plugin is mounted by the 绘图模式 agent preset only. It registers tools and
+ * provides no service, so it neither leaks into the root realm nor becomes
+ * visible to a session whose preset does not name it. The host services its
+ * tools borrow (`llm`, `attachments`) are read through `ctx.get` and stashed in
+ * `lib/services.js`, because a tool body receives execution data, not this
+ * context.
  *
  * Tool definitions are built by `lib/tool.js` rather than by
- * `@deepseek-ai/dsh-tools`: a user preset under `~/.dsh/.agent-presets` is
- * outside Node's upward `node_modules` walk of the harness, so importing a
- * harness package there is not guaranteed to resolve. `test/harness-schema.test.js`
- * proves the local compiler projects and validates exactly like the harness one.
+ * `@deepseek-ai/dsh-tools`: the installed bundle lives where the harness
+ * packages do not resolve, so importing them there is not guaranteed.
+ * `test/harness-schema.test.js` proves the local compiler projects and validates
+ * exactly like the harness one.
  */
-const { tools: comfyuiTools } = __modules[4].exports;
-const { tools: danbooruTools } = __modules[6].exports;
-const { tools: civitaiTools } = __modules[8].exports;
-const { tools: visionTools } = __modules[11].exports;
+const { tools: comfyuiTools } = __modules[8].exports;
+const { tools: danbooruTools } = __modules[10].exports;
+const { tools: civitaiTools } = __modules[12].exports;
+const { tools: visionTools } = __modules[6].exports;
+const { setHostServices } = __modules[3].exports;
 
-/** Harness service this plugin needs. */
+/** Harness services this plugin needs. */
 const inject = exports.inject = ['tools']
 
 /** Every tool this package registers, in registration order. */
@@ -3889,6 +4111,8 @@ const toolList = exports.toolList = function toolList() {
 }
 
 const apply = exports.apply = function apply(ctx) {
+  // The harness context always has `get`; a bare test double may not.
+  setHostServices({ llm: ctx.get?.('llm'), attachments: ctx.get?.('attachments') })
   const disposers = []
   for (const tool of toolList()) disposers.push(ctx.tools.register(tool))
   ctx.logger?.info?.('dsh-comfyui-control: %d tools registered', disposers.length)
@@ -3900,7 +4124,7 @@ const apply = exports.apply = function apply(ctx) {
 }
 
 }
-__moduleInit[13] = function module13(exports, url) {
+__moduleInit[14] = function module14(exports, url) {
 /**
  * dsh-comfyui-control — the plugin half of this bundle, as authored.
  *
@@ -3909,7 +4133,7 @@ __moduleInit[13] = function module13(exports, url) {
  * into that single file so the bundle carries no runtime dependency on the
  * harness packages, which a bundle store does not expose to a preset row.
  */
-const { apply, inject, toolList } = __modules[12].exports;
+const { apply, inject, toolList } = __modules[13].exports;
 const { defineTool, ToolArgsError, validateArgs } = __modules[0].exports;
 
 exports.apply = apply; exports.inject = inject; exports.toolList = toolList; exports.defineTool = defineTool; exports.ToolArgsError = ToolArgsError; exports.validateArgs = validateArgs
@@ -3925,10 +4149,10 @@ for (const [id, init] of __moduleInit.entries()) {
   init(exports, __bundleUrl)
 }
 
-export const apply = __modules[13].exports.apply
-export const inject = __modules[13].exports.inject
-export const name = __modules[13].exports.name
-export const toolList = __modules[13].exports.toolList
-export const defineTool = __modules[13].exports.defineTool
-export const ToolArgsError = __modules[13].exports.ToolArgsError
-export const validateArgs = __modules[13].exports.validateArgs
+export const apply = __modules[14].exports.apply
+export const inject = __modules[14].exports.inject
+export const name = __modules[14].exports.name
+export const toolList = __modules[14].exports.toolList
+export const defineTool = __modules[14].exports.defineTool
+export const ToolArgsError = __modules[14].exports.ToolArgsError
+export const validateArgs = __modules[14].exports.validateArgs

@@ -304,26 +304,26 @@ test('historyToRuns classifies stamped and manual graphs', () => {
   assert.deepEqual(historyToRuns({}), [])
 })
 
-test('makeView copies the output and builds a comparison page', () => {
+test('makeView copies the output and builds a comparison page', async () => {
   const out = mkdtempSync(join(tmpdir(), 'dsh-comfyui-output-'))
   const created = []
   try {
     process.env.COMFYUI_OUTPUT = out
     writeFileSync(join(out, 'anima_00007_.png'), pngBytes({}, 4, 6))
     const result = { outputs: ['output/anima_00007_.png'] }
-    makeView(result)
+    await makeView(result)
     assert.equal(result.view_url, `${VIEW_BASE}/anima_00007_.png`)
     created.push(join(COMPARE_DIR, 'anima_00007_.png'))
 
     writeFileSync(join(out, 'reference.png'), pngBytes({}, 4, 6))
     const compared = { outputs: ['output/anima_00007_.png'] }
-    makeView(compared, join(out, 'reference.png'))
+    await makeView(compared, join(out, 'reference.png'))
     assert.equal(compared.view_url, `${VIEW_BASE}/anima_00007_.html`)
     created.push(join(COMPARE_DIR, 'anima_00007_.html'), join(COMPARE_DIR, 'anima_00007__ref.png'))
 
     const missing = { outputs: ['output/nope.png'] }
-    assert.deepEqual(makeView(missing), { outputs: ['output/nope.png'] })
-    assert.equal(makeView({ outputs: [] }).view_url, undefined)
+    assert.deepEqual(await makeView(missing), { outputs: ['output/nope.png'] })
+    assert.equal((await makeView({ outputs: [] })).view_url, undefined)
   } finally {
     delete process.env.COMFYUI_OUTPUT
     rmSync(out, { recursive: true, force: true })

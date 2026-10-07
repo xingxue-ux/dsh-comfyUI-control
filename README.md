@@ -19,7 +19,7 @@
 
 | 工具 | 说明 | 对应上游 |
 |---|---|---|
-| `comfyui_status` | 依赖自检：ComfyUI / 管线模型 / Ollama / camofox / Civitai 配置，返回 `missing[]` 与 `on_demand[]` | `server_info` |
+| `comfyui_status` | 依赖自检：ComfyUI / 管线模型 / **8899 对比页服务** / camofox / Civitai 凭据 / 视觉服务状态，返回 `missing[]` 与 `on_demand[]` | `server_info` |
 | `comfyui_setup_guide` | 初始化清单（每步含操作 / 验证 / 是否必需） | `setup_guide` |
 | `comfyui_get_model_guide` | Anima 官方用法：模型版本、采样参数、提示词规则、限制 | `get_model_guide` |
 | `comfyui_list_models` | 列出 ComfyUI 各模型目录（loras / diffusion_models / text_encoders / vae / upscale_models …） | — |
@@ -29,7 +29,7 @@
 | `comfyui_queue` | 队列查看 / 中断 / 清空 | — |
 | `comfyui_node_info` | 节点输入输出定义查询 | — |
 | `comfyui_extract_image_info` | PNG 元数据解析：ComfyUI prompt/workflow、WebUI parameters、LoRA 配置 | `extract_image_info` |
-| `comfyui_describe_image` | 本地 Ollama 识图（默认 qwen3-vl:8b，NSFW 自动 fallback llava:7b，`detail` 11 问模式） | `describe_image` |
+| `comfyui_describe_image` | 识图，**默认关闭**（你通常已有多模态模型，直接读图）；显式 `enable_vision=true` 后优先用宿主视觉模型 `deepseek-v4.1-flash`，Ollama 为可选的本地回退（qwen3-vl:8b → llava:7b，`detail` 11 问模式） | `describe_image` |
 | `comfyui_deconfuse_image` | 小番茄（Gilbert 曲线）混淆图还原，可 `enc`/`dec` 多次 | `deconfuse_image` |
 | `comfyui_lookup_character_tags` | Danbooru 角色规范 tag（camofox 反检测浏览器，30 天缓存） | `lookup_character_tags` |
 | `comfyui_lookup_character_appearance` | 角色外貌 tag 统计（solo 图 tag 频率） | `lookup_character_appearance` |
@@ -68,10 +68,10 @@ git clone https://github.com/xingxue-ux/dsh-comfyUI-control
 | ComfyUI（默认 `http://127.0.0.1:8188`） | ✅ | 出图与模型列表 |
 | Anima 管线模型 | ✅ | `anima-base-v1.0.safetensors`（`models/diffusion_models/`）、`qwen_3_06b_base.safetensors`（`models/text_encoders/`）、`qwen_image_vae.safetensors`（`models/vae/`）、`RealESRGAN_x2plus.pth`（`models/upscale_models/`，开 `upscale` 时用） |
 | 默认 5 件套 LoRA | ✅（默认挂载） | 见下节；缺了就用 `comfyui_search_lora` + `comfyui_download_lora` 拉 |
-| Ollama + 视觉模型 | 可选 | `ollama pull qwen3-vl:8b`（准确，NSFW 会拒答）+ `ollama pull llava:7b`（无审查 fallback）；不装则只有识图不可用 |
+| **8899 对比页服务** | ✅ | 出图返回的 `view_url` 指向它。启动：`npm run serve-compare`（即 `node tools/serve-compare.mjs`，只读服务 `<DSH_HOME>/storages/dsh-comfyui-control/compare/`）；没启动时 `comfyui_status` 会把它列进必需项并从 `missing[]` 报告，`comfyui_generate` 也会在结果里带 `view_warning` |
 | camofox-browser（默认 `http://127.0.0.1:9377`） | 可选 | `npm install -g @askjo/camofox-browser && camofox-browser`；不装则角色 tag / 外貌统计不可用 |
 | Civitai 凭据 | 可选 | `CIVITAI_TOKEN`（下载）、`CIVITAI_SEARCH_KEY`（搜索）；不配时 by-hash 反查仍可用 |
-| 8899 静态服务 | 可选 | 指向状态目录的 `compare/`，用于查看对比页 |
+| 视觉服务 | 可选（默认关闭） | `comfyui_describe_image` 默认不发请求 —— 你通常就是多模态模型，直接读图即可。需要时传 `enable_vision=true`，默认走宿主视觉模型 `deepseek-v4.1-flash`（opencode-go），用不到 Ollama；想走本地 Ollama 则传 `model=qwen3-vl:8b` 并先 `ollama pull qwen3-vl:8b`（+ `llava:7b` 作为 NSFW 回退） |
 
 装好后在新会话里先调 `comfyui_status`，它会返回 `missing[]` 逐项告诉你缺什么。
 
@@ -146,6 +146,7 @@ docs/LORA_GUIDE.md                LoRA 规范源文件
 tools/
   build-bundle.mjs                【构建】生成 cordis.patch.yml + 自包含插件
   bundle.mjs                      ESM 自包含打包器
+  serve-compare.mjs               8899 对比页静态服务（必需依赖）
   verify.mjs                      bundle 结构与插件自检
   verify-live.mjs                 逐工具真实调用并打印结果
 test/                             node:test 套件
@@ -194,19 +195,26 @@ Node 25 把 `node --test <目录>` 当成模块入口，所以用 glob 形式（
 
 本机验证记录（2026-10-07）：
 
-- `npm test` → 102 用例 / 98 通过 / 4 跳过（跳过项为需要 harness 的可选检查与 Ollama 识图）/ 0 失败
+- `npm test` → 108 用例 / 106 通过 / 1 跳过 / 0 失败
 - `node tools/verify.mjs` → 12/12（bundle 声明、插件行可解析、构建产物与源码一致、18 工具注册）
-- `node tools/verify-live.mjs` → 13 次真实调用 12 次成功，唯一失败是预期的 `ollama pull` 提示
-- 真实出图：`comfyui_generate`（Anima，512x512，8 步，CFG 2）20 秒完成，输出 1024x1024；
+- 真实出图：`comfyui_generate`（Anima，512x512，8 步，CFG 2）17 秒完成，输出 1024x1024；
   回读 PNG 元数据可见 KSampler 参数与注入的 5 个 LoraLoader
 - 真实角色查询：`comfyui_lookup_character_tags('hatsune miku')` → `hatsune_miku`（147090 posts）
 - 真实 by-hash 反查：`surtr945_v1.safetensors` → model 2692601 / version 3023314 / base Anima
 - 小番茄解混淆：enc/dec 两次往返像素完全一致
+- `comfyui_status` 实测：`view_server=online`（`npm run serve-compare` 起着时），
+  `comfyui_describe_image` 默认返回「视觉服务默认关闭」且**零网络请求**
 
 ## 已知限制
 
-- **识图模型**：`qwen3-vl:8b` 会拒 NSFW，自动 fallback 到 `llava:7b`（无审查但多角色图容易幻觉）。
-  未安装视觉模型时 `comfyui_describe_image` 会明确提示 `ollama pull <模型>`。
+- **视觉服务默认关闭，且默认走宿主模型**：`comfyui_describe_image` 不传 `enable_vision=true` 时
+  只回一句说明、不发任何请求。开启后优先用 `opencode-go/deepseek-v4.1-flash`（不存在或不支持图片时
+  依次退到 `deepseek-official/deepseek-flash`、`deepseek-account/deepseek-flash`）；
+  只有显式传 Ollama 模型名（如 `model=qwen3-vl:8b`）才会走本地 Ollama，
+  该路径沿用上游行为：qwen3-vl 会拒 NSFW，自动回退 `llava:7b`（无审查但多角色图容易幻觉）。
+  未安装模型时会明确提示 `ollama pull <模型>`。
+- **8899 服务是必需依赖**：`view_url` 只是 URL，服务没起就打不开。`serve-compare` 只读服务
+  compare 目录、不写盘、不联网；端口用 `COMFYUI_VIEW_PORT` 或 `--port` 改。
 - **Civitai**：搜索端点需要 `CIVITAI_SEARCH_KEY`，下载需要 `CIVITAI_TOKEN`；by-hash 反查免凭据。
   `publishedAt` 异常的条目 API 搜索搜不到（网页端点可以）；个别模型两端都不收录。
 - **解混淆**：只支持小番茄（Gilbert 曲线）混淆；带密钥的像素混淆无密钥无法还原。

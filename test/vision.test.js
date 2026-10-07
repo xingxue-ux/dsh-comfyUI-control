@@ -29,6 +29,7 @@ process.env.DSH_COMFYUI_STATE = tempPath('state')
 const { OLLAMA_URL } = await import('../lib/env.js')
 const { decodePng, encodePng, parsePng, readTextMetadata } = await import('../lib/png.js')
 const { tools } = await import('../lib/tools/vision.js')
+const { setHostServicesForTest } = await import('../lib/services.js')
 const { gilbertCurve, transformTimes, xfqTransform } = await import('../lib/xfq.js')
 
 const describeTool = tools.find((tool) => tool.name === 'comfyui_describe_image')
@@ -334,12 +335,126 @@ function withFetch(t, responses) {
   return calls
 }
 
+/** A stand-in for the harness llm + attachments services. */
+function stubHostServices(t, { models = {}, answer = 'host vision answer', resolveThrows = false } = {}) {
+  const calls = []
+  const previous = setHostServicesForTest({
+    llm: {
+      resolveModelInfo: async (provider, model) => {
+        if (resolveThrows) throw new Error('no resolver')
+        const hit = (models[provider] ?? []).find((entry) => entry.id === model)
+        if (!hit) throw new Error(`unknown model ${provider}/${model}`)
+        return { inputModalities: hit.inputModalities }
+      },
+      listModels: async (provider) => models[provider] ?? [],
+      stream: (options) => {
+        calls.push(options)
+        return (async function* stream() {
+          yield { type: 'text-delta', text: answer }
+          yield { type: 'finish', reason: { kind: 'stop' } }
+        })()
+      },
+    },
+    attachments: {
+      saveImage: async ({ data, mediaType, name }) => {
+        calls.push({ saved: { bytes: data.length, mediaType, name } })
+        return { id: 'att_test', mediaType, bytes: data.length }
+      },
+    },
+  })
+  t.after(() => setHostServicesForTest(previous))
+  return calls
+}
+
+test('comfyui_describe_image is off by default and sends no request', async (t) => {
+  const path = tempPath('off.png')
+  writeFileSync(path, encodePng({ width: 4, height: 4, channels: 3, data: new Uint8Array(48).fill(9) }))
+  const calls = withFetch(t, [{ message: { content: 'should not be called' } }])
+  const answer = await describeTool.execute({ image_path: path, question: '描述这张图' }, {})
+  assert.match(answer, /视觉服务默认关闭/)
+  assert.match(answer, /enable_vision=true/)
+  assert.equal(calls.length, 0, 'the disabled path must not touch the network')
+})
+
+test('DSH_COMFYUI_VISION turns the vision tool on for a deployment', async (t) => {
+  const path = tempPath('env.png')
+  writeFileSync(path, encodePng({ width: 4, height: 4, channels: 3, data: new Uint8Array(48).fill(5) }))
+  const calls = withFetch(t, [{ message: { content: 'env answer' } }])
+  const previous = process.env.DSH_COMFYUI_VISION
+  process.env.DSH_COMFYUI_VISION = '1'
+  t.after(() => {
+    if (previous === undefined) delete process.env.DSH_COMFYUI_VISION
+    else process.env.DSH_COMFYUI_VISION = previous
+  })
+  const answer = await describeTool.execute({ image_path: path, question: '描述这张图', model: 'qwen3-vl:8b' }, {})
+  assert.equal(answer, 'env answer')
+  assert.equal(calls.length, 1)
+})
+
+test('an enabled describe prefers the host deepseek-v4.1-flash route', async (t) => {
+  const path = tempPath('host.png')
+  writeFileSync(path, encodePng({ width: 4, height: 4, channels: 3, data: new Uint8Array(48).fill(6) }))
+  const calls = stubHostServices(t, {
+    models: {
+      'opencode-go': [{ id: 'deepseek-v4-flash', inputModalities: ['text'] }, { id: 'deepseek-v4.1-flash', inputModalities: ['text', 'image'] }],
+      'deepseek-official': [{ id: 'deepseek-flash', inputModalities: ['text', 'image'] }],
+    },
+    answer: '一个水色的双马尾少女。',
+  })
+  const answer = await describeTool.execute({ image_path: path, question: '描述这张图', enable_vision: true }, {})
+  assert.equal(answer, '一个水色的双马尾少女。')
+  const streamed = calls.find((call) => call.provider)
+  assert.equal(streamed.provider, 'opencode-go')
+  assert.equal(streamed.model, 'deepseek-v4.1-flash')
+  assert.equal(streamed.messages[0].content[0].type, 'text')
+  assert.equal(streamed.messages[0].content[1].type, 'image')
+  const saved = calls.find((call) => call.saved)
+  assert.equal(saved.saved.mediaType, 'image/png')
+  assert.ok(saved.saved.bytes > 0)
+})
+
+test('the host route falls back to another vision-capable model when v4.1 flash is absent', async (t) => {
+  const path = tempPath('host-fallback.png')
+  writeFileSync(path, encodePng({ width: 4, height: 4, channels: 3, data: new Uint8Array(48).fill(8) }))
+  const calls = stubHostServices(t, {
+    models: { 'deepseek-official': [{ id: 'deepseek-flash', inputModalities: ['text', 'image'] }] },
+    answer: 'fallback answer',
+  })
+  const answer = await describeTool.execute({ image_path: path, question: '描述这张图', enable_vision: true }, {})
+  assert.equal(answer, 'fallback answer')
+  assert.equal(calls.find((call) => call.provider).provider, 'deepseek-official')
+})
+
+test('a host without resolveModelInfo still finds a vision model through listModels', async (t) => {
+  const path = tempPath('host-list.png')
+  writeFileSync(path, encodePng({ width: 4, height: 4, channels: 3, data: new Uint8Array(48).fill(3) }))
+  const calls = stubHostServices(t, {
+    models: { 'opencode-go': [{ id: 'deepseek-v4.1-flash', inputModalities: ['text', 'image'] }] },
+    answer: 'list answer',
+    resolveThrows: true,
+  })
+  const answer = await describeTool.execute({ image_path: path, question: '描述这张图', enable_vision: true }, {})
+  assert.equal(answer, 'list answer')
+  assert.equal(calls.find((call) => call.provider).model, 'deepseek-v4.1-flash')
+})
+
+test('an explicit provider/model override wins over the default route', async (t) => {
+  const path = tempPath('host-override.png')
+  writeFileSync(path, encodePng({ width: 4, height: 4, channels: 3, data: new Uint8Array(48).fill(2) }))
+  const calls = stubHostServices(t, { answer: 'override answer' })
+  const answer = await describeTool.execute({ image_path: path, question: '描述这张图', enable_vision: true, model: 'opencode-go/qwen3.8-max' }, {})
+  assert.equal(answer, 'override answer')
+  const streamed = calls.find((call) => call.provider)
+  assert.equal(streamed.provider, 'opencode-go')
+  assert.equal(streamed.model, 'qwen3.8-max')
+})
+
 test('comfyui_describe_image sends the upstream default Ollama request', async (t) => {
   const image = encodePng({ width: 4, height: 4, channels: 3, data: new Uint8Array(48).fill(7) })
   const path = tempPath('default.png')
   writeFileSync(path, image)
   const calls = withFetch(t, [{ message: { content: '一个红色方块。' } }])
-  const answer = await describeTool.execute({ image_path: path, question: '这是什么颜色？' }, {})
+  const answer = await describeTool.execute({ image_path: path, question: '这是什么颜色？', enable_vision: true, model: 'qwen3-vl:8b' }, {})
   assert.equal(answer, '一个红色方块。')
   assert.equal(calls.length, 1)
   assert.equal(calls[0].url, `${OLLAMA_URL}/api/chat`)
@@ -359,7 +474,7 @@ test('comfyui_describe_image falls back to llava:7b on every refusal keyword', a
   // detail-mode keyword, so a free-form question mentioning it stays on llava.
   for (const keyword of ['无法提供', '不能', '抱歉', '不当内容', '公序良俗']) {
     const calls = withFetch(t, [{ message: { content: `${keyword}，换个问题吧。` } }, { message: { content: 'A flat coloured square.' } }])
-    const answer = await describeTool.execute({ image_path: path, question: '描述这张图' }, {})
+    const answer = await describeTool.execute({ image_path: path, question: '描述这张图', enable_vision: true, model: 'qwen3-vl:8b' }, {})
     assert.equal(answer, 'A flat coloured square.', keyword)
     assert.equal(calls.length, 2)
     const retry = JSON.parse(calls[1].init.body)
@@ -373,7 +488,7 @@ test('a single question stays on the main model when the answer merely mentions 
   const path = tempPath('benign.png')
   writeFileSync(path, encodePng({ width: 4, height: 4, channels: 3, data: new Uint8Array(48).fill(3) }))
   const calls = withFetch(t, [{ message: { content: '画面健康积极，构图良好。' } }])
-  const answer = await describeTool.execute({ image_path: path, question: '描述这张图' }, {})
+  const answer = await describeTool.execute({ image_path: path, question: '描述这张图', enable_vision: true, model: 'qwen3-vl:8b' }, {})
   assert.equal(answer, '画面健康积极，构图良好。')
   assert.equal(calls.length, 1)
 })
@@ -382,7 +497,7 @@ test('detail mode treats 健康积极 as a refusal', async (t) => {
   const path = tempPath('detail-refusal.png')
   writeFileSync(path, encodePng({ width: 4, height: 4, channels: 3, data: new Uint8Array(48).fill(4) }))
   const calls = withFetch(t, [{ message: { content: '健康积极的内容无法描述。' } }, { message: { content: 'english answer' } }])
-  const answer = await describeTool.execute({ image_path: path, detail: true }, {})
+  const answer = await describeTool.execute({ image_path: path, detail: true, enable_vision: true, model: 'qwen3-vl:8b' }, {})
   assert.match(answer, /english answer/)
   assert.equal(JSON.parse(calls[1].init.body).model, 'llava:7b')
 })
@@ -391,7 +506,7 @@ test('comfyui_describe_image detail mode runs 11 questions and retries the Engli
   const path = tempPath('detail.png')
   writeFileSync(path, encodePng({ width: 4, height: 4, channels: 3, data: new Uint8Array(48).fill(2) }))
   const calls = withFetch(t, [{ message: { content: '抱歉，无法提供。' } }, { message: { content: 'answer' } }])
-  const report = await describeTool.execute({ image_path: path, detail: true }, {})
+  const report = await describeTool.execute({ image_path: path, detail: true, enable_vision: true, model: 'qwen3-vl:8b' }, {})
   assert.equal(calls.length, 12)
   const first = JSON.parse(calls[0].init.body)
   assert.equal(first.model, 'qwen3-vl:8b')
@@ -412,7 +527,7 @@ test('comfyui_describe_image reports a missing Ollama model with an install hint
   const path = tempPath('missing-model.png')
   writeFileSync(path, encodePng({ width: 4, height: 4, channels: 3, data: new Uint8Array(48) }))
   withFetch(t, [{ __status: 404, error: "model 'qwen3-vl:8b' not found" }])
-  await assert.rejects(describeTool.execute({ image_path: path }, {}), /Ollama model "qwen3-vl:8b" is not installed — run: ollama pull qwen3-vl:8b/)
+  await assert.rejects(describeTool.execute({ image_path: path, enable_vision: true, model: 'qwen3-vl:8b' }, {}), /Ollama model "qwen3-vl:8b" is not installed — run: ollama pull qwen3-vl:8b/)
 })
 
 test('comfyui_deconfuse_image round-trips the pixel permutation and preserves metadata', async () => {
