@@ -1708,7 +1708,11 @@ const tools = exports.tools = [
         stats = await systemStats({ signal: exec.signal })
         info.comfyui = 'online'
       } catch (error) {
-        info.comfyui = error instanceof HttpError ? `http ${error.status}` : `offline (${error?.name ?? 'Error'})`
+        // A refused connection surfaces as a bare TypeError from fetch; name the
+        // URL so the report says which address was tried.
+        info.comfyui = error instanceof HttpError
+          ? `http ${error.status}`
+          : `offline (${error?.cause?.code ?? error?.name ?? 'Error'} at ${COMFYUI_URL})`
       }
       if (info.comfyui !== 'online') info.missing.push('ComfyUI 未运行（启动 ComfyUI，默认 127.0.0.1:8188；启动后用 comfyui_status 复查）')
       if (stats) {
