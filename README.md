@@ -6,7 +6,7 @@
 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）**0.2 bundle**：
 把本地 ComfyUI 接进一个名为 **绘图模式** 的 Agent 预设里，完整复刻
 [`xingxue-ux/good-comfyui-mcp`](https://github.com/xingxue-ux/good-comfyui-mcp) 的 13 个工具，
-并补齐 ComfyUI 控制面，共 **18 个 `comfyui_*` 工具**。
+并补齐 ComfyUI 控制面与复刻自检，共 **19 个 `comfyui_*` 工具**。
 
 安装：`dsh plugin add --profile <profile> dsh-comfyui-control`（见[安装](#安装)）。
 
@@ -20,7 +20,7 @@
 > 0.2 的预设是 bundle patch 里的 `@deepseek-ai/dsh-agent-preset` 声明，必须用
 > `plugin_manager` 安装 bundle 才能出现在预设选择器里。本包就是按 0.2 机制交付的。
 
-## 功能（18 个工具）
+## 功能（19 个工具）
 
 | 工具 | 说明 | 对应上游 |
 |---|---|---|
@@ -29,6 +29,7 @@
 | `comfyui_get_model_guide` | Anima 官方用法：模型版本、采样参数、提示词规则、限制 | `get_model_guide` |
 | `comfyui_list_models` | 列出 ComfyUI 各模型目录（loras / diffusion_models / text_encoders / vae / upscale_models …） | — |
 | `comfyui_generate` | 出图：Anima 管线（默认）或 Krea2 引擎；可覆盖 steps/cfg/sampler/尺寸/seed；参考图自动生成对比页 | `generate` |
+| `comfyui_repro_check` | **复刻自检**：按上游样例元数据原样出图（1216 宽 × 30 步 / CFG 4 / euler_ancestral + 5 件套 LoRA），把结果与上游原图并排展示给你自己目视对比；不做自动评分 | `run_example.py` |
 | `comfyui_run_workflow` | 提交任意 workflow JSON 并等待结果 | — |
 | `comfyui_history` | 历史记录查询与 `mcp`/`manual` 来源标注 | — |
 | `comfyui_queue` | 队列查看 / 中断 / 清空 | — |
@@ -116,6 +117,32 @@ git clone https://github.com/xingxue-ux/dsh-comfyUI-control
 > `comfyui_status` 会单独检查这 5 个文件（`default_loras.present/missing`）：它们不在 `pipeline.json` 里，
 > 是生成时动态注入的，所以不检查的话新装环境会误报 `ready: true`。
 
+### 复刻自检（`comfyui_repro_check`）
+
+移植了上游 `run_example.py` 的目的，但**不做 MAE 自动判定**：用上游两个样例的元数据原样出图，
+然后把生成图与上游原图并排放在对比页里，由你目视判断本地环境是否与上游参考一致。
+
+| 样例 | 尺寸 | seed | 说明 |
+|---|---|---|---|
+| `repro_anima_00015` | 1216×912 | 8682388855765119 | 双人沙发月光夜 |
+| `repro_sofa_rose` | 1216×832 | 2075224187 | 沙发玫瑰写实 |
+
+两张都用 30 步、CFG 4、`euler_ancestral`/`simple`、同一套 5 件套 LoRA（含 `darklight` 0.4、`RealSkin` 0.8/0.7 的差异也与上游一致）。
+元数据固定在 `repro/samples.json`，并有测试逐字段比对上游 `examples/*.json`，防止漂移。
+
+用法：
+
+```
+comfyui_repro_check                          # 两个样例都跑（需要参考图已缓存）
+comfyui_repro_check(allow_download=true)     # 首次：同意从上游仓库下载参考原图（约 5MB/张）
+comfyui_repro_check(sample='repro_sofa_rose')# 只跑一个
+```
+
+- 上游参考图**不随包发布**（两张共约 10MB）。首次必须显式 `allow_download=true`，下载后按清单里的
+  sha256 校验并缓存在 `<DSH_HOME>/storages/dsh-comfyui-control/repro/`；校验不过就报错，不会拿错图对比。
+- 生成的图与上游原图都写到 `compare/repro/` 下，8899 服务在线时返回的 `view_url` 可直接打开并排对比。
+- 前置：底模与 5 件套 LoRA 齐全、ComfyUI 运行中、8899 在跑。
+
 ## 配置
 
 全部通过环境变量，都有可用默认值：
@@ -157,11 +184,11 @@ preset/
   agent.cordis.yml                预设的插件列表（唯一真源，build 时嵌入 patch）
   dsh-comfyui-control/            预设加载的插件（随 bundle 一起安装）
     lib/entry.js                  插件入口（人工维护）
-    lib/index.js                  【生成】自包含单文件插件（18 个工具）
+    lib/index.js                  【生成】自包含单文件插件（19 个工具）
     pipeline.json                 【生成】Anima 管线 workflow
     LORA_GUIDE.md                 【生成】LoRA 选用规范
 lib/                              插件实现（打包进 lib/index.js）
-  plugin.js                       注册 18 个工具 + 释放
+  plugin.js                       注册 19 个工具 + 释放
   tool.js                         工具定义与参数校验（对齐 harness schema DSL）
   env.js                          路径与环境变量解析
   http.js                         fetch 封装（超时 / 非 2xx 报错 / 只读探活）
@@ -225,7 +252,7 @@ Node 25 把 `node --test <目录>` 当成模块入口，所以用 glob 形式（
 本机验证记录（2026-10-07）：
 
 - `npm test` → 108 用例 / 106 通过 / 1 跳过 / 0 失败
-- `node tools/verify.mjs` → 12/12（bundle 声明、插件行可解析、构建产物与源码一致、18 工具注册）
+- `node tools/verify.mjs` → 15/15（bundle 声明、插件行可解析、构建产物与源码一致、19 工具注册）
 - 真实出图：`comfyui_generate`（Anima，512x512，8 步，CFG 2）17 秒完成，输出 1024x1024；
   回读 PNG 元数据可见 KSampler 参数与注入的 5 个 LoraLoader
 - 真实角色查询：`comfyui_lookup_character_tags('hatsune miku')` → `hatsune_miku`（147090 posts）

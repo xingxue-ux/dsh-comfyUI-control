@@ -368,10 +368,10 @@ test('lookupCharacterAppearance ranks a fetched page and caches it', async (t) =
   assert.equal(calls.filter((entry) => entry.includes('posts.json')).length, 1)
 })
 
-test('SETUP_STEPS is the 10-step DSH checklist', () => {
+test('SETUP_STEPS is the 11-step DSH checklist', () => {
   const steps = danbooru.SETUP_STEPS
-  assert.equal(steps.length, 10)
-  assert.deepEqual(steps.map((step) => step.step), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
+  assert.equal(steps.length, 11)
+  assert.deepEqual(steps.map((step) => step.step), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11])
   for (const step of steps) {
     assert.deepEqual(Object.keys(step), ['step', 'title', 'action', 'required', 'verify'])
     for (const field of ['title', 'action', 'verify']) assert.equal(typeof step[field], 'string')
@@ -392,7 +392,7 @@ test('SETUP_STEPS is the 10-step DSH checklist', () => {
   }
   assert.match(defaultLoras.action, /CIVITAI_TOKEN/)
   assert.match(defaultLoras.action, /comfyui_download_lora/)
-  assert.deepEqual(steps.filter((step) => !step.required).map((step) => step.step), [8, 9])
+  assert.deepEqual(steps.filter((step) => !step.required).map((step) => step.step), [8, 9, 11])
   assert.equal(steps[0].title.includes('无 Python 依赖'), true)
   for (const name of ['comfyui_status', 'comfyui_generate']) {
     assert.ok(steps.some((step) => step.action.includes(name) || step.verify.includes(name)), `checklist must name ${name}`)

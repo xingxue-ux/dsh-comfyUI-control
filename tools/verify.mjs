@@ -38,14 +38,14 @@ check('every plugin row names a resolvable package or an owned path', compositio
   }))
 
 const tools = toolList()
-check('the source catalog has 18 tools', tools.length === 18, `got ${tools.length}`)
+check('the source catalog has 19 tools', tools.length === 19, `got ${tools.length}`)
 check('the plugin build is committed and current', existsSync(pluginPath) && readFileSync(pluginPath, 'utf8') === bundle())
 
 if (existsSync(pluginPath)) {
   const built = await import(`file:///${pluginPath.replace(/\\/g, '/')}?verify=${Date.now()}`)
   const registered = []
   built.apply({ tools: { register: (definition) => { registered.push(definition.name); return () => {} } }, on: () => {} })
-  check('the plugin the preset loads registers all 18 tools', registered.length === 18, `registered ${registered.length}`)
+  check('the plugin the preset loads registers all 19 tools', registered.length === 19, `registered ${registered.length}`)
   check('the built catalog equals the source catalog', JSON.stringify([...registered].sort()) === JSON.stringify(tools.map((tool) => tool.name).sort()))
 }
 

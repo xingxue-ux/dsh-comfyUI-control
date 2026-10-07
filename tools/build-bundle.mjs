@@ -12,7 +12,7 @@
  *
  * Usage: node tools/build-bundle.mjs
  */
-import { copyFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -112,8 +112,14 @@ const pluginDir = join(PACKAGE_DIR, 'preset', 'dsh-comfyui-control')
 copyFileSync(join(PACKAGE_DIR, 'pipeline.json'), join(pluginDir, 'pipeline.json'))
 const guide = join(PACKAGE_DIR, 'docs', 'LORA_GUIDE.md')
 if (existsSync(guide)) copyFileSync(guide, join(pluginDir, 'LORA_GUIDE.md'))
+// Same reason as pipeline.json: lib/repro.js reads it from PLUGIN_DIR.
+const reproSamples = join(PACKAGE_DIR, 'repro', 'samples.json')
+if (existsSync(reproSamples)) {
+  mkdirSync(join(pluginDir, 'repro'), { recursive: true })
+  copyFileSync(reproSamples, join(pluginDir, 'repro', 'samples.json'))
+}
 
-const toolCount = rows.find((row) => row?.id === 'comfyui-control') ? 18 : 0
+const toolCount = rows.find((row) => row?.id === 'comfyui-control') ? 19 : 0
 process.stdout.write([
   `wrote ${PATCH}`,
   `wrote ${PLUGIN_ENTRY}`,

@@ -338,6 +338,7 @@ test('every tool is a defineTool definition with a render and a validate-args wr
     'comfyui_status',
     'comfyui_list_models',
     'comfyui_generate',
+    'comfyui_repro_check',
     'comfyui_run_workflow',
     'comfyui_history',
     'comfyui_queue',

@@ -7,9 +7,9 @@ import { existsSync, readFileSync, mkdirSync, readdirSync, statSync, writeFileSy
 import { homedir } from 'node:os'
 import { dirname, isAbsolute, join, resolve, basename, extname, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { createHash, randomUUID } from 'node:crypto'
 import { deflateSync, inflateSync } from 'node:zlib'
 import { spawn } from 'node:child_process'
-import { createHash, randomUUID } from 'node:crypto'
 
 const __moduleInit = []
 __moduleInit[0] = function module0(exports, url) {
@@ -519,6 +519,79 @@ const sleep = exports.sleep = function sleep(ms, signal) {
 }
 __moduleInit[3] = function module3(exports, url) {
 /**
+ * Upstream repro samples.
+ *
+ * `good-comfyui-mcp` ships two example configs plus their reference images and a
+ * MAE comparison. This plugin keeps the samples but drops the scoring: it
+ * regenerates each sample with the upstream metadata verbatim and lays the result
+ * beside the upstream original so the user can judge the match by eye.
+ *
+ * The reference images are ~5MB each and are **not** shipped in the package; they
+ * are fetched from the upstream repo at the pinned commit only when the caller
+ * passes `allow_download`, then verified against the manifest's sha256 so a
+ * changed upstream file cannot slip in silently.
+ */
+/* import from node:crypto is hoisted to the file head */
+/* import from node:fs is hoisted to the file head */
+/* import from node:path is hoisted to the file head */
+const { PLUGIN_DIR, STATE_DIR, ensureDir, readJsonFile } = __modules[1].exports;
+
+/** Samples shipped with this package. */
+const SAMPLES_FILE = exports.SAMPLES_FILE = join(PLUGIN_DIR, 'repro', 'samples.json')
+
+/** Where the fetched upstream references live, keyed by file name. */
+const REFERENCE_DIR = exports.REFERENCE_DIR = join(STATE_DIR, 'repro')
+
+/** Manifest of the upstream samples. */
+const loadSamples = exports.loadSamples = function loadSamples() {
+  const manifest = readJsonFile(SAMPLES_FILE)
+  if (!manifest?.samples?.length) throw new Error(`no repro samples in ${SAMPLES_FILE}`)
+  return manifest
+}
+
+const sha256 = exports.sha256 = function sha256(bytes) {
+  return createHash('sha256').update(bytes).digest('hex')
+}
+
+/** A verified local copy of one sample's upstream reference image. */
+const referencePath = exports.referencePath = function referencePath(sample) {
+  return join(REFERENCE_DIR, basename(sample.reference.url))
+}
+
+/**
+ * Return the local reference image, fetching it from upstream when allowed.
+ *
+ * A cached file is trusted only when its bytes match the manifest hash; a
+ * mismatch replaces it. Without `allowDownload` a missing or stale file is
+ * reported rather than fetched, because these are multi-megabyte downloads the
+ * user has to authorize.
+ */
+const ensureReference = exports.ensureReference = async function ensureReference(sample, { allowDownload = false, signal } = {}) {
+  const path = referencePath(sample)
+  if (existsSync(path)) {
+    const bytes = readFileSync(path)
+    if (sha256(bytes) === sample.reference.sha256) return path
+    if (!allowDownload) {
+      throw new Error(`本地参考图与清单不一致：${path}（重新下载需 allow_download=true）`)
+    }
+  } else if (!allowDownload) {
+    throw new Error(`缺少上游参考图 ${basename(path)}（约 ${Math.round(sample.reference.bytes / 1024 / 1024)}MB，需要你同意下载：allow_download=true）`)
+  }
+  const response = await fetch(sample.reference.url, { signal })
+  if (!response.ok) throw new Error(`下载参考图失败 (${response.status}): ${sample.reference.url}`)
+  const bytes = new Uint8Array(await response.arrayBuffer())
+  const digest = sha256(bytes)
+  if (digest !== sample.reference.sha256) {
+    throw new Error(`参考图 sha256 不匹配：期望 ${sample.reference.sha256}，实际 ${digest}（上游文件已变化？）`)
+  }
+  ensureDir(REFERENCE_DIR)
+  writeFileSync(path, bytes)
+  return path
+}
+
+}
+__moduleInit[4] = function module4(exports, url) {
+/**
  * Optional host services the plugin borrows at runtime.
  *
  * The plugin publishes tools only, so it never provides a service and never
@@ -552,7 +625,7 @@ const hostAttachments = exports.hostAttachments = function hostAttachments() {
 }
 
 }
-__moduleInit[4] = function module4(exports, url) {
+__moduleInit[5] = function module5(exports, url) {
 /**
  * Dependency-free PNG codec over node:zlib.
  *
@@ -845,7 +918,7 @@ const readTextMetadata = exports.readTextMetadata = function readTextMetadata(bu
 }
 
 }
-__moduleInit[5] = function module5(exports, url) {
+__moduleInit[6] = function module6(exports, url) {
 /**
  * 小番茄混淆 (Gilbert curve pixel permutation) — port of xfq_tool.py.
  *
@@ -949,7 +1022,7 @@ const transformTimes = exports.transformTimes = function transformTimes(image, m
   return current
 }
 }
-__moduleInit[6] = function module6(exports, url) {
+__moduleInit[7] = function module7(exports, url) {
 /**
  * Image description + 小番茄 de-obfuscation tools.
  *
@@ -969,10 +1042,10 @@ __moduleInit[6] = function module6(exports, url) {
 /* import from node:path is hoisted to the file head */
 const { OLLAMA_URL, STATE_DIR, outputDir, resolveUserPath } = __modules[1].exports;
 const { HttpError, postJson } = __modules[2].exports;
-const { decodePng, encodePng, parsePng } = __modules[4].exports;
-const { hostAttachments, hostLlm } = __modules[3].exports;
+const { decodePng, encodePng, parsePng } = __modules[5].exports;
+const { hostAttachments, hostLlm } = __modules[4].exports;
 const { defineTool } = __modules[0].exports;
-const { transformTimes } = __modules[5].exports;
+const { transformTimes } = __modules[6].exports;
 
 const MAIN_MODEL = 'qwen3-vl:8b'
 const FALLBACK_MODEL = 'llava:7b'
@@ -1316,7 +1389,7 @@ Pass \`question\` for one specific question, or detail=true for the 11-question 
 ]
 
 }
-__moduleInit[7] = function module7(exports, url) {
+__moduleInit[8] = function module8(exports, url) {
 /**
  * The ComfyUI engine: pipeline loading and rewriting, submission and polling,
  * the web-API surface (system stats, models, object_info, queue, history) and
@@ -2009,7 +2082,7 @@ const viewServerUp = exports.viewServerUp = async function viewServerUp(timeoutM
 }
 
 }
-__moduleInit[8] = function module8(exports, url) {
+__moduleInit[9] = function module9(exports, url) {
 /**
  * The ComfyUI control tools: server status, model listing, Anima/Krea2
  * generation, arbitrary workflows, history, queue control, node schemas and
@@ -2022,11 +2095,12 @@ __moduleInit[8] = function module8(exports, url) {
 /* import from node:path is hoisted to the file head */
 /* import from node:zlib is hoisted to the file head */
 const { defineTool } = __modules[0].exports;
-const { CACHE_DIR, CAMOFOX_URL, CIVITAI_SEARCH_KEY, CIVITAI_TOKEN, COMFYUI_URL, DEFAULT_PIPELINE, OLLAMA_URL, VIEW_BASE, listFiles, outputDir, readJsonFile, resolveUserPath } = __modules[1].exports;
+const { CACHE_DIR, CAMOFOX_URL, CIVITAI_SEARCH_KEY, CIVITAI_TOKEN, COMFYUI_URL, COMPARE_DIR, DEFAULT_PIPELINE, OLLAMA_URL, VIEW_BASE, listFiles, outputDir, readJsonFile, resolveUserPath } = __modules[1].exports;
 const { HttpError, getJson, tryJson } = __modules[2].exports;
-const { hostLlm } = __modules[3].exports;
-const { HOST_VISION_CANDIDATES } = __modules[6].exports;
-const { KREA2_UNET, clearQueue, executionError, findNodes, historyToRuns, historyView, interrupt, loadPipeline, makeView, modelNames, nodeInfo, queueView, recentRunSources, requireResource, runGraph, runKrea2, runPipeline, systemStats, viewServerUp, viewUrl } = __modules[7].exports;
+const { ensureReference, loadSamples } = __modules[3].exports;
+const { hostLlm } = __modules[4].exports;
+const { HOST_VISION_CANDIDATES } = __modules[7].exports;
+const { KREA2_UNET, clearQueue, executionError, findNodes, historyToRuns, historyView, interrupt, loadPipeline, makeView, modelNames, nodeInfo, queueView, recentRunSources, requireResource, runGraph, runKrea2, runPipeline, systemStats, viewServerUp, viewUrl } = __modules[8].exports;
 
 const DEFAULT_UNET = 'anima-base-v1.0.safetensors'
 const DEFAULT_NEGATIVE = '(score_4, score_5, score_6:1.2), worst quality, low quality, normal quality, bad hands, bad feet, bad anatomy, '
@@ -2128,6 +2202,46 @@ function imageItems(outputs) {
     }
     return item
   })
+}
+
+/**
+ * One repro sample as a page: the upstream original and the fresh generation
+ * side by side, at a shared display width so they are comparable at a glance.
+ */
+function reproHtml(sample, upstreamName, generatedName) {
+  const meta = `seed ${sample.seed} · ${sample.width}x${sample.height} · ${sample.steps} steps · CFG ${sample.cfg} · ${sample.sampler_name}/${sample.scheduler}`
+  return '<!DOCTYPE html><html><head><meta charset="UTF-8">'
+    + `<title>复刻对比 ${sample.name}</title><style>`
+    + 'body{background:#111;color:#eee;font:14px/1.5 system-ui,sans-serif;margin:0;padding:16px}'
+    + 'h1{font-size:18px;margin:0 0 4px}.meta{color:#9aa;margin:0 0 12px}'
+    + '.row{display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap}'
+    + '.card{flex:1 1 420px;min-width:320px}.card h2{font-size:14px;margin:0 0 6px;color:#cdd}'
+    + '.card img{width:100%;height:auto;display:block;border:1px solid #333;background:#000}'
+    + '.hint{color:#9aa;margin-top:12px}'
+    + '</style></head><body>'
+    + `<h1>${sample.name} — 上游原图 vs 本地复刻</h1>`
+    + `<p class="meta">${sample.description}｜${meta}</p>`
+    + '<div class="row">'
+    + `<div class="card"><h2>🖼 上游原图（good-comfyui-mcp）</h2><img src="${upstreamName}"></div>`
+    + `<div class="card"><h2>🎨 本地生成</h2><img src="${generatedName}"></div>`
+    + '</div>'
+    + '<p class="hint">两张图用同一套元数据（prompt / seed / 步数 / CFG / 采样器 / LoRA 权重）。看构图、姿势、光影、风格强度是否一致；'
+    + '差异明显时先用 comfyui_lookup_lora_hash 核对 LoRA 版本。</p>'
+    + '</body></html>'
+}
+
+/** Plain-text summary of a repro run for the model to relay. */
+function renderRepro(value) {
+  const lines = ['复刻对比（生成图与上游原图并排，自己看）:']
+  for (const run of value.samples ?? []) {
+    lines.push(`\n[${run.sample}] ${run.description}`)
+    lines.push(`  状态: ${run.status}  ${run.elapsed_s}s  prompt_id=${run.prompt_id}`)
+    lines.push(`  生成: ${run.generated}`)
+    lines.push(`  上游: ${run.upstream}`)
+    lines.push(`  对比页: ${run.view_url}`)
+  }
+  lines.push(`\n${value.compare}`)
+  return lines.join('\n')
 }
 
 /** Anima / Krea2 / whatever the file name suggests — for LoRA metadata searches. */
@@ -2816,6 +2930,85 @@ const tools = exports.tools = [
   }),
 
   defineTool({
+    name: 'comfyui_repro_check',
+    description: '复刻上游 good-comfyui-mcp 的两个样例（repro_anima_00015 / repro_sofa_rose），用样例元数据原样出图，'
+      + '然后把生成的图与上游原图并排放在同一个对比页里展示，由用户自己目视比较（本工具不做 MAE 之类的自动判定）。'
+      + '元数据完全按上游样例：prompt / 负面 prompt / seed / 1216 宽度 / 30 步 / CFG 4 / euler_ancestral / simple / LoRA 组合（含 0.4 的 darklight）。'
+      + '前置条件：底模与 5 件套 LoRA 齐全、ComfyUI 运行中、8899 服务在跑（否则返回的 view_url 打不开）。'
+      + '上游原图约 5MB/张，本包不包含它们：首次运行需要你同意下载（allow_download=true），下载后按清单 sha256 校验并缓存。'
+      + '这是"环境一致性"自检：两张图与上游原图看起来一致，说明本地底模/LoRA/管线与上游参考环境相同。',
+    timeoutMs: 3 * 60 * 60 * 1000,
+    parameters: {
+      allow_download: { type: 'boolean', default: false, description: '同意从上游仓库下载缺失的参考原图（约 5MB/张，首次需要）。默认 false 时缺图就报错、不发起下载。' },
+      sample: { type: 'string', description: '只跑某一个样例（repro_anima_00015 / repro_sofa_rose）。默认两个都跑。' },
+      timeout: { type: 'integer', description: '单张等待秒数，覆盖排队+生成（默认 1800，范围 30-3600）。' },
+    },
+    output: {
+      schema: { type: 'json' },
+      render: (_args, value) => textBlock(renderRepro(value)),
+    },
+    async execute(args, exec) {
+      const manifest = loadSamples()
+      const wanted = args.sample
+        ? manifest.samples.filter((entry) => entry.name === args.sample)
+        : manifest.samples
+      if (wanted.length === 0) {
+        throw new Error(`未知样例: ${args.sample}（可用: ${manifest.samples.map((entry) => entry.name).join(', ')}）`)
+      }
+      const outDir = join(COMPARE_DIR, 'repro')
+      mkdirSync(outDir, { recursive: true })
+      const runs = []
+      for (const sample of wanted) {
+        const started = Date.now()
+        // Fetch (or verify) the upstream original before spending GPU time on it.
+        const reference = await ensureReference(sample, { allowDownload: args.allow_download === true, signal: exec.signal })
+        const run = await runPipeline({
+          prompt: sample.prompt,
+          negativePrompt: sample.negative_prompt,
+          seed: sample.seed,
+          width: sample.width,
+          height: sample.height,
+          unetName: DEFAULT_UNET,
+          loraText: sample.lora_text,
+          scheduler: sample.scheduler,
+          steps: sample.steps,
+          cfg: sample.cfg,
+          samplerName: sample.sampler_name,
+          timeoutMs: timeoutMs(args.timeout, 1800),
+          signal: exec.signal,
+        })
+        const produced = join(outputDir(), ...String(run.outputs[0] ?? '').replace(/^output\//, '').split(/[\\/]/))
+        if (!existsSync(produced)) throw new Error(`生成完成但找不到输出文件: ${run.outputs[0]}`)
+        const mine = join(outDir, `${sample.name}_generated.png`)
+        copyFileSync(produced, mine)
+        const theirs = join(outDir, `${sample.name}_upstream.png`)
+        copyFileSync(reference, theirs)
+        const page = join(outDir, `${sample.name}.html`)
+        writeFileSync(page, reproHtml(sample, basename(theirs), basename(mine)), 'utf8')
+        runs.push({
+          sample: sample.name,
+          description: sample.description,
+          prompt_id: run.prompt_id,
+          status: run.status,
+          elapsed_s: Math.max(1, Math.round((Date.now() - started) / 1000)),
+          output: produced,
+          generated: mine,
+          upstream: theirs,
+          view_url: `${VIEW_BASE}/repro/${basename(page)}`,
+          files: [theirs, mine],
+          seed: sample.seed,
+          sampled_at: { width: sample.width, height: sample.height, steps: sample.steps, cfg: sample.cfg, sampler: sample.sampler_name, loras: sample.lora_text },
+        })
+      }
+      return {
+        samples: runs,
+        compare: '把每组的 generated / upstream 两张图打开并排看：构图、姿势、光影、LoRA 风格强度是否一致。两张都像 = 本地底模与 LoRA 版本与上游参考环境一致；差异明显时先用 comfyui_lookup_lora_hash 核对 LoRA 版本。',
+        note: '不提供自动评分（按需求由用户目视比较）。生成的与上游原图都写在 compare/repro/ 下，8899 服务在线时 view_url 可直接打开。',
+      }
+    },
+  }),
+
+  defineTool({
     name: 'comfyui_run_workflow',
     description: '提交任意 API 格式的 workflow（prompt 图：{"节点id": {"class_type": "...", "inputs": {...}}}）并等待执行完成，'
       + '返回 prompt_id、输出图片与各节点输出摘要。节点输入名/类型用 comfyui_node_info 查询，模型名用 comfyui_list_models 查询。'
@@ -2989,7 +3182,7 @@ const tools = exports.tools = [
 ]
 
 }
-__moduleInit[9] = function module9(exports, url) {
+__moduleInit[10] = function module10(exports, url) {
 /**
  * Danbooru character lookup driven through a local camofox-browser.
  *
@@ -3429,19 +3622,22 @@ const SETUP_STEPS = exports.SETUP_STEPS = [
   { step: 10, title: '跑一遍真实出图验证',
     action: '用 comfyui_generate 出一张小图（如 512x512、steps 8）：提示词用默认 5 件套 LoRA，出图后用 comfyui_extract_image_info 回读 PNG 元数据；也可在源码目录跑 node tools/verify-live.mjs 一次性验证所有实时工具',
     required: true, verify: 'comfyui_generate 返回 status=completed 与 view_url；元数据里能看到 KSampler 参数与 5 个 LoraLoader' },
+  { step: 11, title: '复刻自检（可选，需要你同意下载）',
+    action: 'comfyui_repro_check 用上游两个样例的元数据原样出图（1216 宽 / 30 步 / CFG 4 / 5 件套 LoRA），把结果与上游原图并排展示给你自己目视对比，不做自动评分。上游参考原图约 5MB/张、不随包发布：首次要传 allow_download=true 下载并按 sha256 校验缓存；用 sample 参数可只跑一张',
+    required: false, verify: '返回 view_url 能打开并排对比页；两张图的构图/光影/风格强度与上游原图接近，说明本地底模与 LoRA 版本与上游参考环境一致' },
 ]
 
 exports.APPEARANCE_SKIP = APPEARANCE_SKIP; exports.CHARACTER_CATEGORY = CHARACTER_CATEGORY; exports.WIKI_TEXT_LIMIT = WIKI_TEXT_LIMIT
 
 }
-__moduleInit[10] = function module10(exports, url) {
+__moduleInit[11] = function module11(exports, url) {
 /**
  * Character tools: Danbooru tag lookup, statistical appearance lookup, cache
  * listing and the initialization checklist. All four are mounted in the
  * 绘图模式 preset and drive a local camofox-browser.
  */
 const { defineTool } = __modules[0].exports;
-const { SETUP_STEPS, listCachedCharacters, lookupCharacter, lookupCharacterAppearance } = __modules[9].exports;
+const { SETUP_STEPS, listCachedCharacters, lookupCharacter, lookupCharacterAppearance } = __modules[10].exports;
 
 /** `{a: 1, b: 'x'}` -> `a=1 b="x"`, undefined entries dropped. */
 function inlineFields(entries) {
@@ -3547,7 +3743,7 @@ const tools = exports.tools = [
 ]
 
 }
-__moduleInit[11] = function module11(exports, url) {
+__moduleInit[12] = function module12(exports, url) {
 /**
  * Civitai LoRA search engine — a faithful port of good-comfyui-mcp's
  * `lora_search.py`.
@@ -3972,7 +4168,7 @@ const safetensorsHeader = exports.safetensorsHeader = function safetensorsHeader
 }
 
 }
-__moduleInit[12] = function module12(exports, url) {
+__moduleInit[13] = function module13(exports, url) {
 /**
  * Civitai LoRA tools: exact-version search, download + safetensors validation,
  * and by-hash reverse lookup.
@@ -3983,7 +4179,7 @@ __moduleInit[12] = function module12(exports, url) {
 /* import from node:fs is hoisted to the file head */
 /* import from node:path is hoisted to the file head */
 const { COMFYUI_ROOT } = __modules[1].exports;
-const { downloadVersion, findExactData, lookupByHash, safetensorsHeader } = __modules[11].exports;
+const { downloadVersion, findExactData, lookupByHash, safetensorsHeader } = __modules[12].exports;
 const { defineTool } = __modules[0].exports;
 
 /** `models/loras`, optionally nested one level deeper by `subdir`. */
@@ -4100,7 +4296,7 @@ const tools = exports.tools = [
 ]
 
 }
-__moduleInit[13] = function module13(exports, url) {
+__moduleInit[14] = function module14(exports, url) {
 /**
  * Plugin activation: register every tool this package contributes.
  *
@@ -4117,11 +4313,11 @@ __moduleInit[13] = function module13(exports, url) {
  * `test/harness-schema.test.js` proves the local compiler projects and validates
  * exactly like the harness one.
  */
-const { tools: comfyuiTools } = __modules[8].exports;
-const { tools: danbooruTools } = __modules[10].exports;
-const { tools: civitaiTools } = __modules[12].exports;
-const { tools: visionTools } = __modules[6].exports;
-const { setHostServices } = __modules[3].exports;
+const { tools: comfyuiTools } = __modules[9].exports;
+const { tools: danbooruTools } = __modules[11].exports;
+const { tools: civitaiTools } = __modules[13].exports;
+const { tools: visionTools } = __modules[7].exports;
+const { setHostServices } = __modules[4].exports;
 
 /** Harness services this plugin needs. */
 const inject = exports.inject = ['tools']
@@ -4145,7 +4341,7 @@ const apply = exports.apply = function apply(ctx) {
 }
 
 }
-__moduleInit[14] = function module14(exports, url) {
+__moduleInit[15] = function module15(exports, url) {
 /**
  * dsh-comfyui-control — the plugin half of this bundle, as authored.
  *
@@ -4154,7 +4350,7 @@ __moduleInit[14] = function module14(exports, url) {
  * into that single file so the bundle carries no runtime dependency on the
  * harness packages, which a bundle store does not expose to a preset row.
  */
-const { apply, inject, toolList } = __modules[13].exports;
+const { apply, inject, toolList } = __modules[14].exports;
 const { defineTool, ToolArgsError, validateArgs } = __modules[0].exports;
 
 exports.apply = apply; exports.inject = inject; exports.toolList = toolList; exports.defineTool = defineTool; exports.ToolArgsError = ToolArgsError; exports.validateArgs = validateArgs
@@ -4170,10 +4366,10 @@ for (const [id, init] of __moduleInit.entries()) {
   init(exports, __bundleUrl)
 }
 
-export const apply = __modules[14].exports.apply
-export const inject = __modules[14].exports.inject
-export const name = __modules[14].exports.name
-export const toolList = __modules[14].exports.toolList
-export const defineTool = __modules[14].exports.defineTool
-export const ToolArgsError = __modules[14].exports.ToolArgsError
-export const validateArgs = __modules[14].exports.validateArgs
+export const apply = __modules[15].exports.apply
+export const inject = __modules[15].exports.inject
+export const name = __modules[15].exports.name
+export const toolList = __modules[15].exports.toolList
+export const defineTool = __modules[15].exports.defineTool
+export const ToolArgsError = __modules[15].exports.ToolArgsError
+export const validateArgs = __modules[15].exports.validateArgs

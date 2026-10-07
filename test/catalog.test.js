@@ -20,6 +20,7 @@ const EXPECTED_TOOLS = [
   'comfyui_get_model_guide',
   'comfyui_list_models',
   'comfyui_generate',
+  'comfyui_repro_check',
   'comfyui_run_workflow',
   'comfyui_history',
   'comfyui_queue',

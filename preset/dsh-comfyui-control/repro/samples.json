@@ -1,0 +1,49 @@
+{
+  "note": "上游 good-comfyui-mcp 的两个复刻样例。comfyui_repro_check 用这里的元数据原样出图，并把生成的图与 upstream 原图并排展示给用户自行对比；不做自动化像素判定。",
+  "upstream": "xingxue-ux/good-comfyui-mcp",
+  "upstream_ref": "57896e2edab27ecfd9b481d1e327a2a2213b94e0",
+  "samples": [
+    {
+      "name": "repro_anima_00015",
+      "description": "双人沙发月光夜（上游 anima_00015 复刻样例）",
+      "width": 1216,
+      "height": 912,
+      "steps": 30,
+      "cfg": 4.0,
+      "seed": 8682388855765119,
+      "sampler_name": "euler_ancestral",
+      "scheduler": "simple",
+      "lora_text": "<lora:ushikani_kassen_lora-000013.safetensors:0.3>, <lora:anima-darklight-style-v1-000194.safetensors:0.4>, <lora:anima-base-1-photo-background-v4.safetensors:0.6>, <lora:RealSkin SliderV2.safetensors:0.8>, <lora:surtr945_v1.safetensors:0.8>",
+      "prompt": "nsfw, 2girls, loli, white hair, silver hair, red eyes, black hair, long hair, night, moonlight, indoors, living room, couch, backlighting, overexposure, lamp, babydoll, white babydoll, black babydoll, thin straps, front slit, see-through clothes, sheer fabric, covered nipples, pantyshot, thigh strap, midriff, bare navel, flat chest, hugging pillow, laughing, lounging, smile, fond, pale skin, very fair skin, The girl with silver-white hair sits on the left, hugging a cushion and laughing; the girl with long black hair lounges on the right, her right toes resting on the silver-haired girl lap, toes flat, watching her with a soft fond smile, one thigh strap circling her leg. Cold moonlight and a warm desk lamp light the room, the backlight creating a gentle overexposure that makes their pale skin glow softly against the dark blue room. Flat cel shading, crisp black outlines, a bookshelf and a potted plant stand in the background.",
+      "negative_prompt": "worst quality, low quality, bad anatomy, bad hands, exposed nipples, nipples, topless, nude",
+      "reference": {
+        "url": "https://raw.githubusercontent.com/xingxue-ux/good-comfyui-mcp/57896e2edab27ecfd9b481d1e327a2a2213b94e0/examples/ref_repro_anima_00015.png",
+        "bytes": 5099976,
+        "width": 2432,
+        "height": 1824,
+        "sha256": "70bd4ac8c8dbe706388e0ebb9f90f7eee5bbf27c44f608bbf4712f23ab0d45fa"
+      }
+    },
+    {
+      "name": "repro_sofa_rose",
+      "description": "沙发玫瑰写实（上游 sofa_rose 复刻样例）",
+      "width": 1216,
+      "height": 832,
+      "steps": 30,
+      "cfg": 4.0,
+      "seed": 2075224187,
+      "sampler_name": "euler_ancestral",
+      "scheduler": "simple",
+      "lora_text": "<lora:ushikani_kassen_lora-000013.safetensors:0.3>, <lora:anima-darklight-style-v1-000194.safetensors:0.4>, <lora:anima-base-1-photo-background-v4.safetensors:0.6>, <lora:RealSkin SliderV2.safetensors:0.7>, <lora:surtr945_v1.safetensors:0.8>",
+      "prompt": "masterpiece, best quality, newest, very aesthetic, highres, gorgeous, luxurious, dreamy, elegant,\n1girl, solo, whole body, three quarter view, facing viewer, looking at viewer, one eye closed, winking,\nlong silvery white gradient hair, golden blonde ends, red hairband,\nlazy reclining lying pose on sofa, one hand holding glasses,\nred rose flowers on coat, white inner top, black loose coat with rose print, burgundy red pleated skirt,\nloose white folded socks, black chunky platform leather shoes,\nvintage ruined brick wall window, dead branches, overgrown vines,\nsoft diffused daylight, gentle soft shadow, refined delicate linework, smooth flat color,\nsoft wrinkled fabric texture, lazy quiet relaxed mood, realistic skin, detailed skin,\npure jet black, deep burgundy red, soft milky white, warm skin tone, smooth painterly brushstrokes,\ncasual gloomy aesthetic, serene atmospheric anime illustration style,\nbloom effect, light particles, reflective surfaces, depth of field, glowing accents",
+      "negative_prompt": "worst quality, low quality, score_1, score_2, score_3, english word, signature, artist name, watermark, web_address, english commentary, bad anatomy, worst hands, deformed hands, deformed fingers, deformed feet, deformed toes, extra limbs, extra arms, extra legs, extra fingers, missing fingers, fused fingers, mutated hands",
+      "reference": {
+        "url": "https://raw.githubusercontent.com/xingxue-ux/good-comfyui-mcp/57896e2edab27ecfd9b481d1e327a2a2213b94e0/examples/ref_repro_sofa_rose.png",
+        "bytes": 4709285,
+        "width": 2432,
+        "height": 1664,
+        "sha256": "1f48aa00a775107700722b07ba40d3e3c50f9e60d4b13004804e4bbf8eb14f41"
+      }
+    }
+  ]
+}
