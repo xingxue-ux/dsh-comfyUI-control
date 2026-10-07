@@ -1,14 +1,19 @@
 # dsh-comfyUI-control
 
-[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）插件：
-把本地 ComfyUI 接到 **绘图模式** Agent 预设里，完整复刻
-[`xingxue-ux/good-comfyui-mcp`](https://github.com/xingxue-ux/good-comfyui-mcp)
-的 13 个工具，并补齐了 ComfyUI 控制面（模型列表 / 任意 workflow / 历史 / 队列 / 节点查询），共 **18 个工具**。
+[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）**0.2 bundle**：
+把本地 ComfyUI 接进一个名为 **绘图模式** 的 Agent 预设里，完整复刻
+[`xingxue-ux/good-comfyui-mcp`](https://github.com/xingxue-ux/good-comfyui-mcp) 的 13 个工具，
+并补齐 ComfyUI 控制面，共 **18 个 `comfyui_*` 工具**。
 
-**只在「绘图模式」预设里生效**：标准模式、极简模式、PTC 模式、创造模式等其他预设不加载这个插件，
+**只在「绘图模式」预设里生效**：标准模式、极简模式、PTC 模式、创造模式等其他预设都不挂载这个插件，
 也就看不到任何 `comfyui_*` 工具。
 
-零运行时依赖（只用 Node 内置模块 + 全局 `fetch`），不需要 pip、不需要 Python MCP 进程。
+零运行时依赖：只用 Node 内置模块 + 全局 `fetch`，不需要 pip、不需要常驻 Python MCP 进程。
+
+> **0.2 与旧版预设机制的区别（重要）**
+> DSH 0.1 从 `$DSH_HOME/.agent-presets/<id>/` 读取用户预设；**0.2 已经不再读这个目录**。
+> 0.2 的预设是 bundle patch 里的 `@deepseek-ai/dsh-agent-preset` 声明，必须用
+> `plugin_manager` 安装 bundle 才能出现在预设选择器里。本包就是按 0.2 机制交付的。
 
 ## 功能（18 个工具）
 
@@ -35,40 +40,28 @@
 
 ## 安装
 
-### 1. 安装预设
+### 1. 拿到 bundle 目录
 
 ```bash
 git clone https://github.com/xingxue-ux/dsh-comfyUI-control
-cd dsh-comfyUI-control
-node tools/install-preset.mjs          # 安装到 ~/.dsh/.agent-presets/drawing
 ```
 
-安装脚本把预设需要的文件复制到 `~/.dsh/.agent-presets/drawing/`：
+### 2. 用 plugin_manager 安装
 
-```
-preset.yml                        显示名「绘图模式」与选择器描述
-agent.cordis.yml                  预设编排；挂载 ./dsh-comfyui-control/lib/index.js
-dsh-comfyui-control/lib/index.js  自包含插件（18 个 comfyui_* 工具）
-pipeline.json                     Anima 管线 workflow（随预设一起安装）
-LORA_GUIDE.md                     LoRA 规范，供 Agent 用 read 工具查阅
-```
+对 Agent 说：
 
-- 插件被**打包成一个自包含 ESM 文件**放在预设里：用户预设目录在 harness 的 `node_modules`
-  向上查找路径之外，`import '@deepseek-ai/dsh-tools'` 在那里解析不到，所以不能有外部依赖。
-- 插件保持 `lib/` 这一级目录形状，它就能像在源码目录里一样解析自己的根目录，
-  `pipeline.json`、`compare/` 与角色缓存的路径都落在预期位置。
-- `LORA_GUIDE.md` 同时复制到 `<dsh-home>/storages/dsh-comfyui-control/`，
-  安装输出会打印两个绝对路径。
+> 用 plugin_manager 安装 `E:\AI\ComfyUI\dsh-comfyUI-control` 这个 bundle（action: install_bundle）。
 
-常用参数：`--id <dir>` 改预设目录名（默认 `drawing`）、`--dsh-home <dir>`、`--force` 覆盖已存在的预设、
-`--uninstall` 卸载（只删预设目录）。
+也可以在「设置 → 插件」里安装同一个目录。装完后 `plugin_manager` 的 `list_bundles` 会列出它，
+`list_plugins` 里会出现 `preset-drawing` 行。
 
-### 2. 打开预设
+### 3. 选择预设
 
-重启 DSH（或重新加载配置），在 Agent 预设选择器里选 **绘图模式**；
-也可以在「设置 → 通用 → Agent 预设」里把它设为默认，然后新建会话。
+预设名 **绘图模式**（id `drawing`）。在 Agent 预设选择器里选它，或设为默认预设后新建会话。
 
-### 3. 环境依赖
+> 预设只对**新会话**生效；已在运行的会话保持启动时的插件版本。
+
+### 4. 环境依赖
 
 | 依赖 | 必需 | 说明 |
 |---|---|---|
@@ -78,9 +71,9 @@ LORA_GUIDE.md                     LoRA 规范，供 Agent 用 read 工具查阅
 | Ollama + 视觉模型 | 可选 | `ollama pull qwen3-vl:8b`（准确，NSFW 会拒答）+ `ollama pull llava:7b`（无审查 fallback）；不装则只有识图不可用 |
 | camofox-browser（默认 `http://127.0.0.1:9377`） | 可选 | `npm install -g @askjo/camofox-browser && camofox-browser`；不装则角色 tag / 外貌统计不可用 |
 | Civitai 凭据 | 可选 | `CIVITAI_TOKEN`（下载）、`CIVITAI_SEARCH_KEY`（搜索）；不配时 by-hash 反查仍可用 |
-| 8899 静态服务 | 可选 | `node -e "..."` 或 `python -m http.server 8899` 指向状态目录的 `compare/`，用于查看对比页 |
+| 8899 静态服务 | 可选 | 指向状态目录的 `compare/`，用于查看对比页 |
 
-装好后在会话里先调 `comfyui_status`，它会返回 `missing[]` 逐项告诉你缺什么。
+装好后在新会话里先调 `comfyui_status`，它会返回 `missing[]` 逐项告诉你缺什么。
 
 ### 默认 5 件套 LoRA
 
@@ -94,24 +87,15 @@ LORA_GUIDE.md                     LoRA 规范，供 Agent 用 read 工具查阅
 | `RealSkin SliderV2.safetensors` | 0.8 | 写实皮肤 |
 | `surtr945_v1.safetensors` | 0.8 | 画风 |
 
-用 `comfyui_search_lora` 可以查到它们的 Civitai 精确版本，再用
-`comfyui_download_lora` 下载到 `models/loras/`：
-
-```text
-comfyui_search_lora(filename='surtr945_v1.safetensors', base_model='Anima')
-→ { exact: true, kind: 'KNOWN', model_id: '2692601', version_id: '3023314', author: 'umina' }
-comfyui_download_lora(version_id=3023314, filename='surtr945_v1.safetensors')
-```
-
 ## 配置
 
 全部通过环境变量，都有可用默认值：
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
-| `COMFYUI_ROOT` | 插件目录的上级（若含 `models/`） | ComfyUI 安装根目录；`models/`、`output/` 都在其下。兼容上游写法 `MODELS_ROOT` |
+| `COMFYUI_ROOT` | bundle 内探测（含 `models/` 的那一级） | ComfyUI 安装根目录；`models/`、`output/` 都在其下。兼容上游写法 `MODELS_ROOT`。**建议显式设置**，例如 `E:\AI\ComfyUI` |
 | `COMFYUI_URL` | `http://127.0.0.1:8188` | ComfyUI 地址 |
-| `PIPELINE` | 包内 `pipeline.json` | Anima 管线 workflow 路径 |
+| `PIPELINE` | bundle 内 `pipeline.json` | Anima 管线 workflow 路径 |
 | `COMFYUI_OUTPUT` | `<COMFYUI_ROOT>/output` | 出图目录（对比页复制源文件用） |
 | `DSH_COMFYUI_STATE` | `<DSH_HOME>/storages/dsh-comfyui-control` | 角色缓存 `cache/` 与对比页 `compare/` 的根目录 |
 | `OLLAMA_URL` | `http://127.0.0.1:11434` | Ollama 地址 |
@@ -119,9 +103,7 @@ comfyui_download_lora(version_id=3023314, filename='surtr945_v1.safetensors')
 | `COMFYUI_VIEW_BASE` | `http://127.0.0.1:8899` | 对比页 URL 前缀 |
 | `CIVITAI_HOST` | `https://civitai.red` | Civitai 镜像（`civitai.com` 会过滤内容） |
 | `CIVITAI_TOKEN` | 空 | 下载 / 详情接口用 |
-| `CIVITAI_SEARCH_KEY` | 空 | 网页搜索端点用（README 上游 5b 节有获取方式） |
-
-环境变量写在哪由用户决定；如果要让 DSH 进程读到，最省事的是写进启动环境或 profile 的 shell 环境配置。
+| `CIVITAI_SEARCH_KEY` | 空 | 网页搜索端点用 |
 
 ## 与上游 good-comfyui-mcp 的对应关系
 
@@ -139,95 +121,80 @@ comfyui_download_lora(version_id=3023314, filename='surtr945_v1.safetensors')
 ## 目录结构
 
 ```
-index.js                 插件入口（预设行加载它）
-lib/
-  plugin.js              注册 18 个工具 + 释放
-  tool.js                工具定义与参数校验（对齐 @deepseek-ai/dsh-tools 的 schema DSL）
-  env.js                 路径与环境变量解析
-  http.js                fetch 封装（超时 / 非 2xx 报错 / 只读探活）
-  comfyui.js             管线、Krea2、提交轮询、历史/队列、对比页
-  danbooru.js            camofox 会话 + Danbooru 角色查询与缓存
-  lora-search.js         Civitai 搜索/反查/下载引擎（每个请求都有超时）
-  png.js                 PNG 编解码与文本元数据
-  xfq.js                 小番茄 Gilbert 曲线置换
-  tools/                每个领域的工具定义（comfyui / danbooru / civitai / vision）
+package.json                      bundle 元数据：dsh.bundle.patch -> cordis.patch.yml
+cordis.patch.yml                  【生成】preset-drawing 声明 + 插件列表
 preset/
-  preset.yml             预设显示名「绘图模式」与描述
-  agent.cordis.yml       预设编排（唯一挂载本插件的行）
-docs/LORA_GUIDE.md       LoRA 选用规范（安装时复制进预设目录）
+  preset.yml                      预设显示名「绘图模式」、描述、order
+  agent.cordis.yml                预设的插件列表（唯一真源，build 时嵌入 patch）
+  dsh-comfyui-control/            预设加载的插件（随 bundle 一起安装）
+    lib/entry.js                  插件入口（人工维护）
+    lib/index.js                  【生成】自包含单文件插件（18 个工具）
+    pipeline.json                 【生成】Anima 管线 workflow
+    LORA_GUIDE.md                 【生成】LoRA 选用规范
+lib/                              插件实现（打包进 lib/index.js）
+  plugin.js                       注册 18 个工具 + 释放
+  tool.js                         工具定义与参数校验（对齐 harness schema DSL）
+  env.js                          路径与环境变量解析
+  http.js                         fetch 封装（超时 / 非 2xx 报错 / 只读探活）
+  comfyui.js                      管线、Krea2、提交轮询、历史/队列、对比页
+  danbooru.js                     camofox 会话 + Danbooru 角色查询与缓存
+  lora-search.js                  Civitai 搜索/反查/下载引擎（每个请求都有超时）
+  png.js                          PNG 编解码与文本元数据
+  xfq.js                          小番茄 Gilbert 曲线置换
+  tools/                          每个领域的工具定义（comfyui / danbooru / civitai / vision）
+docs/LORA_GUIDE.md                LoRA 规范源文件
 tools/
-  bundle.mjs             自包含打包
-  install-preset.mjs     安装/卸载预设
-  verify.mjs             预设编排、工具表与隔离性自检
-  verify-live.mjs        逐工具真实调用并打印结果
-test/                    node:test 套件
+  build-bundle.mjs                【构建】生成 cordis.patch.yml + 自包含插件
+  bundle.mjs                      ESM 自包含打包器
+  verify.mjs                      bundle 结构与插件自检
+  verify-live.mjs                 逐工具真实调用并打印结果
+test/                             node:test 套件
 ```
 
-## 为什么必须是自包含的
+## 为什么插件是自包含的单文件
 
-用户预设位于 `<DSH_HOME>/.agent-presets/<id>/`，不在 harness 安装目录的
-`node_modules` 向上查找路径里，所以预设里的插件行**不能** `import '@deepseek-ai/dsh-tools'`。
-本插件因此自带一份与 harness 等价的 schema 编译器与参数校验，
-并用 `test/harness-schema.test.js` 对每个工具的编译结果和校验结果与 harness 真实实现逐一比对。
-
-同理，预设行只引用 `./dsh-comfyui-control/lib/index.js` 这个相对路径，插件不会出现在 profile 层，
-其他预设自然看不到。打包器把 `import.meta.url` 重写成**打包产物自己的位置**，
-所以安装到预设目录后，插件解析到的是预设目录，而不是打包时那台机器的源码路径。
+bundle store 里的预设行不保证能解析 harness 的 `@deepseek-ai/*` 包，所以
+`tools/bundle.mjs` 把 `lib/` 内联进 `preset/dsh-comfyui-control/lib/index.js` 这一个文件：
+只保留 Node 内置模块的外部 import，`import.meta.url` 指向打包产物自身
+（插件因此把 `dsh-comfyui-control/` 当作自己的根目录）。
+`lib/tool.js` 自带一份与 harness 等价的 schema 编译器与参数校验，
+`test/harness-schema.test.js` 对每个工具的编译结果和校验结果与 harness 真实实现逐一比对。
 
 ## 开发与验证
 
 ```bash
-node --test "test/*.test.js"   # 99 用例：单元 + 契约 + 预设隔离 + 实时冒烟（服务不在时自动跳过）
-node tools/bundle.mjs          # 重新生成预设用的自包含文件
-node tools/verify.mjs          # 预设编排/工具表/隔离性自检
-node tools/verify.mjs --installed --dsh-home <dir> --id drawing   # 追加校验已安装副本
+npm run build                  # 生成 cordis.patch.yml 与自包含插件（改代码后必跑）
+npm test                       # 102 用例：单元 + 契约 + bundle 结构 + 实时冒烟（服务不在时跳过）
+node tools/verify.mjs          # bundle 结构与插件自检
 node tools/verify-live.mjs     # 逐个真实调用需要服务的工具并打印结果
 ```
 
-Node 25 把 `node --test <目录>` 当成模块入口，所以用上面的 glob 形式（package.json 的
-`npm test` 也是这个命令）。
+Node 25 把 `node --test <目录>` 当成模块入口，所以用 glob 形式（`npm test` 已是该命令）。
 
 本机验证记录（2026-10-07）：
 
-- `node --test "test/*.test.js"` → 99 用例 / 98 通过 / 1 跳过（跳过项是 Ollama 识图：
-  本机未安装视觉模型）/ 0 失败。
-- `node tools/verify.mjs --installed` → 14/14（含安装副本自检：预设目录里 18 个工具全部注册、
-  安装后的插件把预设目录解析成自己的根目录、`pipeline.json` 随预设一起安装）。
-- `node tools/verify.mjs` → 8/8（含隔离性：除 绘图模式 外没有任何预设引用本插件）。
-- `node tools/verify-live.mjs` → 13 次真实调用 12 次成功，唯一失败是
-  `comfyui_describe_image` 明确报告 `ollama pull`（本机模型库为空，属预期）。
-- `lib/tool.js` 的 schema 编译与参数校验和 harness 的 `@deepseek-ai/dsh-tools` **逐工具逐字段一致**
-  （`test/harness-schema.test.js` 直接加载 harness 实现对比）。
-- 真实出图：`comfyui_generate`（Anima，512x512，8 步，CFG 2，seed 12345）20 秒完成，
-  输出 `output/Anima/2026-10-07/anima_00003_.png`（管线 2x 放大后 1024x1024），
-  `view_url` 指向 8899 对比页；带回读元数据能看到 KSampler 参数与注入的 LoRA 链。
-- 真实角色查询：`comfyui_lookup_character_tags('hatsune miku')` → `hatsune_miku`
-  （post_count 147090、41 个本地化名与 wiki 描述），`comfyui_lookup_character_appearance`
-  → 38 个外貌 tag。
-- 真实 by-hash 反查：`surtr945_v1.safetensors` → SHA256 `7B1E112E…4BC8D`，
-  命中 model 2692601 / version 3023314 / base Anima，与内置 KNOWN_EXACT 表一致。
-- 小番茄解混淆：`enc/dec` 各两次后像素与原因完全一致；1024x1024 单次 278ms。
+- `npm test` → 102 用例 / 98 通过 / 4 跳过（跳过项为需要 harness 的可选检查与 Ollama 识图）/ 0 失败
+- `node tools/verify.mjs` → 12/12（bundle 声明、插件行可解析、构建产物与源码一致、18 工具注册）
+- `node tools/verify-live.mjs` → 13 次真实调用 12 次成功，唯一失败是预期的 `ollama pull` 提示
+- 真实出图：`comfyui_generate`（Anima，512x512，8 步，CFG 2）20 秒完成，输出 1024x1024；
+  回读 PNG 元数据可见 KSampler 参数与注入的 5 个 LoraLoader
+- 真实角色查询：`comfyui_lookup_character_tags('hatsune miku')` → `hatsune_miku`（147090 posts）
+- 真实 by-hash 反查：`surtr945_v1.safetensors` → model 2692601 / version 3023314 / base Anima
+- 小番茄解混淆：enc/dec 两次往返像素完全一致
 
 ## 已知限制
 
-- **识图模型**：`qwen3-vl:8b` 会拒 NSFW，自动 fallback 到 `llava:7b`（无审查但多角色图容易幻觉，
-  建议裁剪后分角色识图）。未安装视觉模型时 `comfyui_describe_image` 会明确提示
-  `ollama pull <模型>`，不会静默返回空描述。
-- **Civitai 搜索**：模型级 `publishedAt` 异常的条目 API 搜索搜不到（网页端点可以）；
-  个别模型两端都不收录，只能按 ID 直达或用 by-hash 反查。搜索端点需要
-  `CIVITAI_SEARCH_KEY`，下载需要 `CIVITAI_TOKEN`；by-hash 反查免凭据。
-- **解混淆**：只支持小番茄（Gilbert 曲线）混淆；带密钥的像素混淆（如 PicEncrypt）无密钥无法还原。
-  JPEG 有损压缩 / 缩放过的混淆图可能因曲线位置失配而无法完全还原。
-  **输入必须是 PNG**（本插件不引入 JPEG 解码器），且 `times` 上限 64 次
-  （每次都是主机进程内的整幅像素遍历，不能无界）。
+- **识图模型**：`qwen3-vl:8b` 会拒 NSFW，自动 fallback 到 `llava:7b`（无审查但多角色图容易幻觉）。
+  未安装视觉模型时 `comfyui_describe_image` 会明确提示 `ollama pull <模型>`。
+- **Civitai**：搜索端点需要 `CIVITAI_SEARCH_KEY`，下载需要 `CIVITAI_TOKEN`；by-hash 反查免凭据。
+  `publishedAt` 异常的条目 API 搜索搜不到（网页端点可以）；个别模型两端都不收录。
+- **解混淆**：只支持小番茄（Gilbert 曲线）混淆；带密钥的像素混淆无密钥无法还原。
+  输入必须是 PNG（不引入 JPEG 解码器），`times` 上限 64（每次都是主机进程内的整幅像素遍历）。
 - **PNG 编解码**：支持 8 位灰度 / RGB / 调色板 / RGBA；隔行 PNG 会明确报错而不是猜。
-- **出图元数据处理**：非 PNG（如 JPEG）只读取 JPEG `COM` 注释段的文本元数据，
-  并报告格式与尺寸；EXIF 标签数量与 WebUI `parameters` 的深度解析没有复刻
-  （上游用 PIL，本插件不引入图像库依赖）。
-- **磁盘增长**：`compare/`（每次带 `reference_image` 出图都会复制一张）与角色缓存
-  （每个角色一个 JSON）只增不减，需要时自行清理 `<DSH_HOME>/storages/dsh-comfyui-control/`。
-- **批量导入的 LoRA 触发词**：`comfyui_search_lora` 只按文件名与 trainedWords 匹配；
-  私有训练的 LoRA 在 Civitai 上查不到（by-hash 也不命中），属正常。
+- **出图元数据处理**：非 PNG（如 JPEG）只读取 JPEG `COM` 注释段的文本元数据并报告格式与尺寸；
+  EXIF 标签数量与 WebUI `parameters` 的深度解析没有复刻。
+- **磁盘增长**：`compare/` 与角色缓存只增不减，需要时自行清理
+  `<DSH_HOME>/storages/dsh-comfyui-control/`。
 
 ## License
 

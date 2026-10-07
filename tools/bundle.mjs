@@ -17,7 +17,12 @@ import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const PACKAGE_DIR = dirname(dirname(fileURLToPath(import.meta.url)))
-const DEFAULT_ENTRY = join(PACKAGE_DIR, 'index.js')
+/**
+ * The plugin entry as authored. The build writes the generated
+ * `lib/index.js` beside it, which is what the preset row loads; the plugin
+ * resolves its own directory one level up from `lib/`.
+ */
+const DEFAULT_ENTRY = join(PACKAGE_DIR, 'preset', 'dsh-comfyui-control', 'lib', 'entry.js')
 
 /** One static `import ... from '...'` clause. */
 const IMPORT_PATTERN = /^[ \t]*import\b([^'"]*?)\bfrom\s*(['"])([^'"]+)\2[ \t]*;?[ \t]*$/gm

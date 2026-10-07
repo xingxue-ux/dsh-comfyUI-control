@@ -1,45 +1,36 @@
 {
   "name": "dsh-comfyui-control",
-  "version": "0.1.0",
-  "description": "DeepSeek Harness plugin: drive a local ComfyUI from the 绘图模式 agent preset — Anima/Krea2 text-to-image, LoRA search, Danbooru character tags, image metadata, Ollama vision, 小番茄 de-obfuscation",
+  "version": "0.1.1",
+  "description": "DeepSeek Harness 0.2 bundle: the 绘图模式 agent preset, whose 18 comfyui_* tools drive a local ComfyUI — Anima/Krea2 generation, LoRA search, Danbooru tags, PNG metadata, Ollama vision, 小番茄 de-obfuscation",
   "type": "module",
   "license": "MIT",
   "engines": {
     "node": ">=20.3"
   },
-  "main": "index.js",
-  "exports": {
-    ".": "./index.js",
-    "./preset": "./preset/agent.cordis.yml",
-    "./package.json": "./package.json"
-  },
   "files": [
-    "index.js",
-    "lib",
+    "cordis.patch.yml",
     "preset",
+    "lib",
     "docs",
-    "tools",
     "pipeline.json",
     "README.md",
     "LICENSE"
   ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
   "scripts": {
+    "build": "node tools/build-bundle.mjs",
     "test": "node --test \"test/*.test.js\"",
-    "preset:install": "node tools/install-preset.mjs"
+    "verify": "node tools/verify.mjs"
   },
   "keywords": [
     "dsh",
     "deepseek-harness",
-    "comfyui",
+    "dsh-bundle",
     "agent-preset",
-    "plugin"
-  ],
-  "peerDependencies": {
-    "@deepseek-ai/dsh-tools": "*"
-  },
-  "peerDependenciesMeta": {
-    "@deepseek-ai/dsh-tools": {
-      "optional": true
-    }
-  }
+    "comfyui"
+  ]
 }

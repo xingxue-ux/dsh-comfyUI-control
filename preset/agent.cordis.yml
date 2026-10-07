@@ -1,11 +1,11 @@
-# The `绘图模式` agent preset: local ComfyUI image generation.
+# The `绘图模式` agent preset's plugin list: local ComfyUI image generation.
 #
-# This is an AGENT-PLANE composition, mounted once per process under a standing
-# scope; every session that selects 绘图模式 joins it. The host composition keeps
-# the registries, the sandbox and approval stack, persistence, and the model
-# route.
+# This file is the preset composition and nothing else; `tools/build-bundle.mjs`
+# wraps it into the `@deepseek-ai/dsh-agent-preset` declaration inside
+# `cordis.patch.yml`, which is what DSH 0.2 reads. The list is mounted once per
+# process under a standing scope; every session that selects 绘图模式 joins it.
 #
-# The `dsh-comfyui-control` row is what makes this preset the only one with the
+# The `comfyui-control` row is what makes this preset the only one with the
 # comfyui_* tools: no other preset names that plugin, and the plugin registers
 # nothing outside its own mount.
 
@@ -96,9 +96,8 @@
 # 18 个工具：自检/初始化清单/模型指南/模型列表/Anima+Krea2 出图/任意 workflow/
 # 历史/队列/节点查询/PNG 元数据/Ollama 识图/小番茄解混淆/Danbooru 角色 tag 与
 # 外貌统计/Civitai LoRA 检索下载与 by-hash 反查。
-# `tools/install-preset.mjs` 会把包内代码打包成
-# `dsh-comfyui-control/lib/index.js` 放进预设目录（保持包的目录形状，插件因此能
-# 正确解析自己的根目录），不依赖 harness 的 node_modules。
+# `tools/bundle.mjs` 把包内代码打成自包含单文件放在这里，插件因此不依赖
+# harness 的 node_modules（相对路径由 cordis.patch.yml 所在目录解析）。
 
 - id: comfyui-control
   name: './dsh-comfyui-control/lib/index.js'
