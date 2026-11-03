@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="ComfyUI Control">
+  <rect width="64" height="64" rx="14" fill="#1b1d29"/>
+  <rect x="10" y="14" width="44" height="30" rx="5" fill="none" stroke="#6f7cff" stroke-width="3"/>
+  <circle cx="23" cy="27" r="4" fill="#6f7cff"/>
+  <path d="M13 40l11-10 8 7 7-6 12 11" fill="none" stroke="#9aa4ff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="18" y="49" width="28" height="4" rx="2" fill="#3d4470"/>
+</svg>

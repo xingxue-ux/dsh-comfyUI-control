@@ -1,0 +1,107 @@
+{
+  "format": 1,
+  "title": {
+    "en": "ComfyUI Control",
+    "zh": "ComfyUI 控制"
+  },
+  "description": {
+    "en": "Local ComfyUI image generation for DeepSeek Harness.",
+    "zh": "把本地 ComfyUI 接进 DeepSeek Harness 的绘图能力。"
+  },
+  "metadata": {
+    "categories": {
+      "image": {
+        "title": {
+          "en": "Image generation",
+          "zh": "图像生成"
+        }
+      }
+    },
+    "labels": {
+      "comfyui": {
+        "title": {
+          "en": "ComfyUI",
+          "zh": "ComfyUI"
+        }
+      },
+      "agent-preset": {
+        "title": {
+          "en": "Agent preset",
+          "zh": "Agent 预设"
+        }
+      },
+      "local": {
+        "title": {
+          "en": "Runs locally",
+          "zh": "本地运行"
+        }
+      }
+    }
+  },
+  "plugins": [
+    {
+      "name": "dsh-comfyui-control",
+      "title": {
+        "en": "Drawing Mode (ComfyUI)",
+        "zh": "绘图模式"
+      },
+      "description": {
+        "en": "Adds a 绘图模式 agent preset with 19 comfyui_* tools: Anima/Krea2 generation, LoRA search and download, Danbooru character tags, PNG metadata, upstream repro check, and 小番茄 de-obfuscation. Only that preset mounts the tools.",
+        "zh": "新增「绘图模式」Agent 预设，内含 19 个 comfyui_* 工具：Anima/Krea2 出图、LoRA 检索与下载、Danbooru 角色 tag、PNG 元数据、上游复刻自检、小番茄解混淆。只有该预设挂载这些工具。"
+      },
+      "icon": "icon.svg",
+      "author": "xingxue-ux",
+      "homepage": "https://github.com/xingxue-ux/dsh-comfyUI-control#readme",
+      "repository": {
+        "url": "https://github.com/xingxue-ux/dsh-comfyUI-control"
+      },
+      "metadata": {
+        "category": "image",
+        "keywords": [
+          "comfyui",
+          "anima",
+          "lora",
+          "civitai",
+          "danbooru",
+          "image generation",
+          "stable diffusion"
+        ],
+        "labels": [
+          "comfyui",
+          "agent-preset",
+          "local"
+        ]
+      },
+      "versions": [
+        {
+          "version": "0.1.1",
+          "publishTimestamp": 1791389632,
+          "source": {
+            "type": "npm"
+          }
+        },
+        {
+          "version": "0.1.2",
+          "publishTimestamp": 1791391739,
+          "source": {
+            "type": "npm"
+          }
+        },
+        {
+          "version": "0.1.3",
+          "publishTimestamp": 1791392076,
+          "source": {
+            "type": "npm"
+          }
+        },
+        {
+          "version": "0.1.4",
+          "publishTimestamp": 1793714297,
+          "source": {
+            "type": "npm"
+          }
+        }
+      ]
+    }
+  ]
+}
