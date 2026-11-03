@@ -4,7 +4,9 @@
       config:
         id: drawing
         name: 绘图模式
-        description: 本地 ComfyUI 出图专用：13 个 comfyui_* 工具（环境自检/模型列表/Anima+Krea2 出图/任意 workflow/历史/队列/节点查询/PNG 元数据复刻/Ollama 识图/小番茄解混淆/Danbooru 角色 tag/外观统计/Civitai LoRA 检索下载 by-hash 反查），默认 5 件套 LoRA 与 8899 对比页。
+        description: >-
+          本地 ComfyUI 出图专用：19 个 comfyui_* 工具（环境自检/初始化清单/模型指南/模型列表/Anima+Krea2 出图/上游复刻自检/任意 workflow/历史/队列/节点查询/PNG 元数据/Ollama 识图/小番茄解混淆/Danbooru 角色 tag/外观统计/Civitai LoRA 检索下载 by-hash 反查），默认 5 件套 LoRA 与
+          8899 对比页。
         order: 5
         plugins:
           - id: persona
@@ -19,9 +21,10 @@
                 官方用法（模型版本、采样参数、提示词规则、限制），选参数前先看。 - comfyui_list_models：查可用模型 / LoRA（folder=loras / diffusion_models / text_encoders / vae / upscale_models / checkpoints）。 -
                 comfyui_lookup_character_tags / comfyui_lookup_character_appearance：角色首次使用必须查规范 tag 与外貌统计，
                   不要凭记忆编角色名；查完把提示词交给用户确认再出图。
-                - comfyui_list_cached_characters：已经查过的角色（离线可用）。 - comfyui_generate：出图主入口（engine=anima 或 krea2，可传 reference_image 生成对比页）。 - comfyui_run_workflow：跑任意 workflow JSON（高级用法；用户给了工作流文件时用）。 -
-                comfyui_extract_image_info：解析 PNG 内嵌元数据（seed / 提示词 / 负面 / LoRA / 采样参数），复刻第一步。 - comfyui_describe_image：本地 Ollama 识图（qwen3-vl:8b，NSFW 自动 fallback llava:7b）。 -
-                comfyui_deconfuse_image：小番茄（Gilbert 曲线）混淆图还原。 - comfyui_search_lora / comfyui_download_lora / comfyui_lookup_lora_hash：Civitai LoRA 精确版检索、下载、
+                - comfyui_list_cached_characters：已经查过的角色（离线可用）。 - comfyui_generate：出图主入口（engine=anima 或 krea2，可传 reference_image 生成对比页）。 - comfyui_repro_check：复刻自检，用上游样例元数据原样出图并与上游原图并排展示，供用户目视对比。 -
+                comfyui_run_workflow：跑任意 workflow JSON（高级用法；用户给了工作流文件时用）。 - comfyui_extract_image_info：解析 PNG 内嵌元数据（seed / 提示词 / 负面 / LoRA / 采样参数），复刻第一步。 - comfyui_describe_image：本地 Ollama
+                识图（qwen3-vl:8b，NSFW 自动 fallback llava:7b）。 - comfyui_deconfuse_image：小番茄（Gilbert 曲线）混淆图还原。 - comfyui_search_lora / comfyui_download_lora / comfyui_lookup_lora_hash：Civitai LoRA
+                精确版检索、下载、
                   by-hash 反查来源（缺 LoRA 或想确认文件版本时用）。
                 - comfyui_history / comfyui_queue / comfyui_node_info：追溯历史、看队列、查节点输入输出。
 
@@ -48,11 +51,13 @@
                 # 复刻参考图 1. comfyui_extract_image_info 解析元数据（ComfyUI prompt/workflow 或 WebUI parameters）。 2. 提示词与负面一字不改照抄（负面不同画面差异很大），seed 优先复用。 3. 无元数据的图：comfyui_describe_image 描述内容，必要时
                 comfyui_lookup_character_tags 确认角色。 4. comfyui_generate(..., reference_image=<原图路径>) 出图并生成对比页。 5. 尺寸、LoRA、放大设置与元数据保持一致；差异大先查 LoRA 版本（comfyui_lookup_lora_hash）。
 
-                # 出图后展示 - 给出本地文件路径 + view_url；有参考图时提醒打开 8899 对比页。 - 需要检查成图质量时用宿主 view_image 看图（人脸/手/构图/画风逐项判断），发现崩坏就迭代重出。
+                # 出图后展示 - 给出本地文件路径 + view_url；有参考图时提醒打开 8899 对比页。 - 需要检查成图质量时用宿主 read_image 看图（人脸/手/构图/画风逐项判断），发现崩坏就迭代重出。
           - id: agent-instructions
             name: '@deepseek-ai/dsh-agent-instructions'
             config:
               maxBytes: 65536
+          - id: time-context
+            name: '@deepseek-ai/dsh-time-context'
           - id: comfyui-control
             name: ./node_modules/dsh-comfyui-control/preset/dsh-comfyui-control/lib/index.js
           - id: tool-bash

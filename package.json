@@ -1,7 +1,7 @@
 {
   "name": "dsh-comfyui-control",
-  "version": "0.1.3",
-  "description": "DeepSeek Harness 0.2 bundle: the 绘图模式 agent preset, whose 18 comfyui_* tools drive a local ComfyUI — Anima/Krea2 generation, LoRA search, Danbooru tags, PNG metadata, 小番茄 de-obfuscation",
+  "version": "0.1.4",
+  "description": "DeepSeek Harness 0.2 bundle: the 绘图模式 agent preset, whose 19 comfyui_* tools drive a local ComfyUI — Anima/Krea2 generation, upstream repro check, LoRA search, Danbooru tags, PNG metadata, 小番茄 de-obfuscation",
   "type": "module",
   "license": "MIT",
   "engines": {
