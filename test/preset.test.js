@@ -111,6 +111,19 @@ test('only the preset composition names the plugin', () => {
   assert.match(rows[0], /'\.\/dsh-comfyui-control\/lib\/index\.js'/)
 })
 
+test('the preset only interpolates prompt variables the host registers', () => {
+  // DSH 0.2.1 registers exactly these for prompt sections. An unknown name
+  // aborts prompt assembly, so the preset cannot compose a session at all —
+  // `{{cwd}}` did exactly that after the 0.2.0 → 0.2.1 upgrade.
+  const REGISTERED = new Set(['provider', 'model'])
+  const composition = readFileSync(COMPOSITION, 'utf8')
+  const used = [...composition.matchAll(/\{\{([^}]+)\}\}/g)].map((match) => match[1].trim())
+  for (const name of used) {
+    assert.ok(REGISTERED.has(name), `{{${name}}} is not a registered prompt variable (registered: ${[...REGISTERED].join(', ')})`)
+  }
+  assert.ok(used.includes('model'), 'the persona still names the model')
+})
+
 test('the committed plugin build matches a fresh one', () => {
   assert.ok(existsSync(PLUGIN), 'the built plugin is committed')
   assert.equal(readFileSync(PLUGIN, 'utf8'), bundle(), 'run `npm run build` and commit the result')
